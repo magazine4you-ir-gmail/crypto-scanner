@@ -236,6 +236,24 @@ export const translations: Translations = {
   paperTradingPerformance: { fa: 'عملکرد پیپر تریدینگ', en: 'Paper Trading Performance' },
   backtestPerformance: { fa: 'عملکرد بک‌تست', en: 'Backtest Performance' },
   comingSoon: { fa: 'به‌زودی', en: 'Coming Soon' },
+  // Auto scan
+  autoScan: { fa: 'اسکن خودکار', en: 'Auto Scan' },
+  asDescription: {
+    fa: 'اسکن ساعتی ۱۰۰ ارز برتر روی سرور (حتی وقتی سایت بسته است). سیگنال‌های خرید و شورت به‌همراه ورود، حد ضرر و هدف نمایش داده می‌شوند.',
+    en: 'Hourly server-side scan of the top 100 coins (runs even when the site is closed). Shows Buy and Short signals with entry, stop loss and target.',
+  },
+  asShort: { fa: 'شورت', en: 'SHORT' },
+  asBuyAndShort: { fa: 'خرید و شورت', en: 'Buy & Short' },
+  asLastScan: { fa: 'آخرین اسکن', en: 'Last scan' },
+  asCoins: { fa: 'ارز', en: 'coins' },
+  asRefresh: { fa: 'بازخوانی', en: 'Refresh' },
+  asTarget: { fa: 'هدف ۱', en: 'Target 1' },
+  asSince: { fa: 'فعال از', en: 'Active since' },
+  asNoData: { fa: 'هنوز اسکنی انجام نشده. اولین اسکن خودکار حداکثر تا یک ساعت دیگر نتیجه می‌دهد.', en: 'No scan results yet. The first automatic scan will appear within an hour.' },
+  asLoginRequired: { fa: 'برای دیدن نتایج اسکن خودکار وارد حساب خود شوید.', en: 'Sign in to view the auto-scan results.' },
+  asStale: { fa: 'اسکن خودکار بیش از ۲ ساعت است که اجرا نشده. زمان‌بندی (cron) و تابع اسکن را در Supabase بررسی کنید.', en: 'The auto scan has not run for over 2 hours. Check the cron schedule and the scan function in Supabase.' },
+  asLastFailed: { fa: 'آخرین اسکن با خطا تمام شد', en: 'The last scan failed' },
+  asTablesMissing: { fa: 'جدول‌های اسکن خودکار هنوز ساخته نشده‌اند. فایل migration مربوط به auto_scan را در Supabase اجرا کنید.', en: 'The auto-scan tables do not exist yet. Run the auto_scan migration in Supabase.' },
 };
 
 export function t(key: string, lang: Lang): string {
