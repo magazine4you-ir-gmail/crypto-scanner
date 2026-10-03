@@ -4,6 +4,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import {
   LayoutDashboard,
   Radar,
+  Timer,
   LineChart,
   Star,
   Briefcase,
@@ -22,6 +23,7 @@ import { useState } from 'react';
 const navItems = [
   { key: 'dashboard', path: '/', icon: LayoutDashboard },
   { key: 'scanner', path: '/scanner', icon: Radar },
+  { key: 'autoScan', path: '/auto-scan', icon: Timer },
   { key: 'watchlist', path: '/watchlist', icon: Star },
   { key: 'portfolio', path: '/portfolio', icon: Briefcase },
   { key: 'journal', path: '/journal', icon: BookOpen },
