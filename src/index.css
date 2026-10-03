@@ -69,6 +69,10 @@
     @apply signal-badge bg-error-500/20 text-error-400 border border-error-500/30;
   }
 
+  .signal-sell {
+    @apply signal-badge bg-error-500/20 text-error-400 border border-error-500/30;
+  }
+
   .signal-no-trade {
     @apply signal-badge bg-surface-400/20 text-surface-700 border border-surface-400/30;
   }
