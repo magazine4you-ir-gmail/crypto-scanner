@@ -7,6 +7,7 @@ import { RegisterPage } from '@/pages/RegisterPage';
 import { ResetPasswordPage } from '@/pages/ResetPasswordPage';
 import { DashboardPage } from '@/pages/DashboardPage';
 import { ScannerPage } from '@/pages/ScannerPage';
+import { AutoScanPage } from '@/pages/AutoScanPage';
 import { AssetDetailPage } from '@/pages/AssetDetailPage';
 import { WatchlistPage } from '@/pages/WatchlistPage';
 import { PortfolioPage } from '@/pages/PortfolioPage';
@@ -57,6 +58,7 @@ function AppRoutes() {
 
       <Route path="/" element={<AppRoute><DashboardPage /></AppRoute>} />
       <Route path="/scanner" element={<AppRoute><ScannerPage /></AppRoute>} />
+      <Route path="/auto-scan" element={<AppRoute><AutoScanPage /></AppRoute>} />
       <Route path="/asset/:symbol" element={<AppRoute><AssetDetailPage /></AppRoute>} />
       <Route path="/watchlist" element={<AppRoute><WatchlistPage /></AppRoute>} />
       <Route path="/portfolio" element={<AppRoute><PortfolioPage /></AppRoute>} />
