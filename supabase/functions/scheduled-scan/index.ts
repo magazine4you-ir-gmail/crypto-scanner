@@ -799,7 +799,75 @@ Deno.serve(async (req: Request) => {
       const { error } = await supabase.from("scan_results").upsert(rows.slice(i, i + 150), { onConflict: "symbol,timeframe" });
       if (error) throw new Error(`saving results failed: ${error.message}`);
     }
+    // ----- Signal Lab: register new BUY/SELL outcomes -----
+    const actionable = rows.filter(
+      (r) =>
+        (r.signal_type === "BUY" || r.signal_type === "SELL") &&
+        r.stop_loss != null &&
+        r.target1 != null,
+    );
 
+    if (actionable.length > 0) {
+      // load currently OPEN outcomes to avoid duplicates
+      const { data: openRows } = await supabase
+        .from("signal_outcomes")
+        .select("symbol, timeframe, signal_type")
+        .eq("status", "OPEN");
+
+      const openSet = new Set(
+        (openRows ?? []).map((o) => `${o.symbol}|${o.timeframe}|${o.signal_type}`),
+      );
+
+      const toInsert: Record<string, unknown>[] = [];
+
+      for (const r of actionable) {
+        const key = `${r.symbol}|${r.timeframe}|${r.signal_type}`;
+        if (openSet.has(key)) continue;
+
+        // cancel opposite OPEN signal on same symbol+tf
+        const opposite = r.signal_type === "BUY" ? "SELL" : "BUY";
+        const oppKey = `${r.symbol}|${r.timeframe}|${opposite}`;
+        if (openSet.has(oppKey)) {
+          await supabase
+            .from("signal_outcomes")
+            .update({ status: "CANCELLED", exit_at: nowIso, notes: "opposite signal" })
+            .eq("symbol", r.symbol)
+            .eq("timeframe", r.timeframe)
+            .eq("signal_type", opposite)
+            .eq("status", "OPEN");
+        }
+
+        toInsert.push({
+          symbol: r.symbol,
+          base_asset: r.base_asset,
+          timeframe: r.timeframe,
+          signal_type: r.signal_type,
+          score: r.score,
+          price_at_signal: r.price,
+          entry_low: r.entry_low,
+          entry_high: r.entry_high,
+          stop_loss: r.stop_loss,
+          target1: r.target1,
+          target2: r.target2,
+          risk_reward: r.risk_reward,
+          signal_at: nowIso,
+          status: "OPEN",
+          source: "auto_scan",
+        });
+        openSet.add(key);
+      }
+
+      for (let i = 0; i < toInsert.length; i += 100) {
+        const { error: insErr } = await supabase
+          .from("signal_outcomes")
+          .insert(toInsert.slice(i, i + 100));
+        if (insErr) {
+          // non-fatal: scan results already saved
+          console.error("signal_outcomes insert:", insErr.message);
+        }
+      }
+    }
+    // ----- end Signal Lab -----
     // Remove coins that dropped out of the universe, and timeframes no longer scanned
     const symbolList = coins.map((c) => c.symbol).join(",");
     await supabase.from("scan_results").delete().not("symbol", "in", `(${symbolList})`);
