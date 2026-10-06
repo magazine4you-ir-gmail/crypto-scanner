@@ -250,3 +250,52 @@ export function computeStats(rows: SignalOutcome[]): OutcomeStats {
     byScoreBucket,
   };
 }
+export async function registerOutcomeFromSignal(input: {
+  symbol: string;
+  baseAsset: string;
+  timeframe: string;
+  signalType: 'BUY' | 'SELL';
+  score: number;
+  price: number;
+  entryLow?: number | null;
+  entryHigh?: number | null;
+  stopLoss: number;
+  target1: number;
+  target2?: number | null;
+  riskReward?: number | null;
+  source?: string;
+}): Promise<boolean> {
+  const { data: existing } = await supabase
+    .from('signal_outcomes')
+    .select('id')
+    .eq('symbol', input.symbol)
+    .eq('timeframe', input.timeframe)
+    .eq('signal_type', input.signalType)
+    .eq('status', 'OPEN')
+    .maybeSingle();
+
+  if (existing) return false;
+
+  const { error } = await supabase.from('signal_outcomes').insert({
+    symbol: input.symbol,
+    base_asset: input.baseAsset,
+    timeframe: input.timeframe,
+    signal_type: input.signalType,
+    score: input.score,
+    price_at_signal: input.price,
+    entry_low: input.entryLow ?? null,
+    entry_high: input.entryHigh ?? null,
+    stop_loss: input.stopLoss,
+    target1: input.target1,
+    target2: input.target2 ?? null,
+    risk_reward: input.riskReward ?? null,
+    status: 'OPEN',
+    source: input.source ?? 'manual_scan',
+  });
+
+  if (error) {
+    console.error('registerOutcomeFromSignal', error.message);
+    return false;
+  }
+  return true;
+}
