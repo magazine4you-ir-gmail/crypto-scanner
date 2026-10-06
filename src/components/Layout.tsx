@@ -17,6 +17,7 @@ import {
   LogIn,
   Menu,
   X,
+  TestTubes,
 } from 'lucide-react';
 import { useState } from 'react';
 
@@ -31,6 +32,7 @@ const navItems = [
   { key: 'performance', path: '/performance', icon: TrendingUp },
   { key: 'settings', path: '/settings', icon: SettingsIcon },
   { key: 'profile', path: '/profile', icon: UserIcon },
+  { key: 'signalLab', path: '/signal-lab', icon: TestTubes },
 ];
 
 export function Layout({ children }: { children: React.ReactNode }) {
