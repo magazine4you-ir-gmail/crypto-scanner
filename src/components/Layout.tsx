@@ -25,6 +25,7 @@ const navItems = [
   { key: 'dashboard', path: '/', icon: LayoutDashboard },
   { key: 'scanner', path: '/scanner', icon: Radar },
   { key: 'autoScan', path: '/auto-scan', icon: Timer },
+  { key: 'signalLab', path: '/signal-lab', icon: TestTubes },
   { key: 'watchlist', path: '/watchlist', icon: Star },
   { key: 'portfolio', path: '/portfolio', icon: Briefcase },
   { key: 'journal', path: '/journal', icon: BookOpen },
@@ -32,7 +33,6 @@ const navItems = [
   { key: 'performance', path: '/performance', icon: TrendingUp },
   { key: 'settings', path: '/settings', icon: SettingsIcon },
   { key: 'profile', path: '/profile', icon: UserIcon },
-  { key: 'signalLab', path: '/signal-lab', icon: TestTubes },
 ];
 
 export function Layout({ children }: { children: React.ReactNode }) {
