@@ -1,15 +1,16 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useSettings } from '@/contexts/SettingsContext';
 import { fetchKlinesValidated, fetchCoinGeckoMarkets } from '@/services/marketData';
 import { analyze } from '@/engine/signalEngine';
 import { saveSignal } from '@/services/signalService';
+import { registerOutcomeFromSignal } from '@/services/outcomeService';
 import type { SignalResult } from '@/types/signal';
 import type { Timeframe } from '@/types/market';
-import { Card, SectionTitle, LoadingSpinner, ErrorState, EmptyState, Disclaimer } from '@/components/UI';
+import { TIMEFRAMES } from '@/types/market';
+import { Card, LoadingSpinner, ErrorState, EmptyState, Disclaimer } from '@/components/UI';
 import { SignalBadge, TrendBadge, RiskBadge, ScoreBar } from '@/components/Badges';
 import { formatPrice } from '@/i18n/format';
-import { TIMEFRAMES } from '@/types/market';
 import { Radar, Filter, ChevronRight } from 'lucide-react';
 
 const UNIVERSE_OPTIONS = [
@@ -57,38 +58,42 @@ export function ScannerPage() {
             continue;
           }
           if (candles.length < 50) continue;
+
           const result = analyze(symbol, timeframe, candles);
           allResults.push(result);
-          saveSignal(result).catch(() => {});
+
+          // save to signals history (non-blocking)
+          void saveSignal(result).catch(() => {});
+
+          // register BUY setups into Signal Lab (non-blocking)
+          if (
+            result.signalType === 'BUY' &&
+            result.risk &&
+            result.risk.stopLoss != null &&
+            result.risk.target1 != null
+          ) {
+            void registerOutcomeFromSignal({
+              symbol: result.symbol,
+              baseAsset: result.symbol.replace(/USDT$/i, ''),
+              timeframe,
+              signalType: 'BUY',
+              score: result.score,
+              price: result.priceAtSignal,
+              entryLow: result.risk.entryLow,
+              entryHigh: result.risk.entryHigh,
+              stopLoss: result.risk.stopLoss,
+              target1: result.risk.target1,
+              target2: result.risk.target2,
+              riskReward: result.risk.riskReward,
+              source: 'manual_scan',
+            }).catch(() => {});
+          }
         } catch {
           // Skip failed symbols
         }
         setProgress(Math.round(((i + 1) / symbols.length) * 100));
       }
-import { registerOutcomeFromSignal } from '@/services/outcomeService';
 
-// داخل حلقه، بعد از analyze:
-const result = analyze(symbol, timeframe, candles);
-allResults.push(result);
-saveSignal(result).catch(() => {});
-
-if (result.signalType === 'BUY' && result.risk?.stopLoss && result.risk?.target1) {
-  registerOutcomeFromSignal({
-    symbol: result.symbol,
-    baseAsset: result.symbol.replace('USDT', ''),
-    timeframe,
-    signalType: 'BUY',
-    score: result.score,
-    price: result.priceAtSignal,
-    entryLow: result.risk.entryLow,
-    entryHigh: result.risk.entryHigh,
-    stopLoss: result.risk.stopLoss,
-    target1: result.risk.target1,
-    target2: result.risk.target2,
-    riskReward: result.risk.riskReward,
-    source: 'manual_scan',
-  }).catch(() => {});
-}
       allResults.sort((a, b) => b.score - a.score);
       setResults(allResults);
     } catch (e) {
@@ -112,7 +117,6 @@ if (result.signalType === 'BUY' && result.risk?.stopLoss && result.risk?.target1
         <h1 className="text-2xl font-bold text-slate-100">{t('scannerTitle')}</h1>
       </div>
 
-      {/* Filters */}
       <Card>
         <div className="flex items-center gap-2 mb-4">
           <Filter className="w-4 h-4 text-slate-400" />
@@ -125,46 +129,70 @@ if (result.signalType === 'BUY' && result.risk?.stopLoss && result.risk?.target1
             <option value="top50">{t('top50')}</option>
             <option value="top100">{t('top100')}</option>
           </select>
-          <select value={timeframe} onChange={(e) => setTimeframe(e.target.value as Timeframe)} className="input-field text-sm">
+          <select
+            value={timeframe}
+            onChange={(e) => setTimeframe(e.target.value as Timeframe)}
+            className="input-field text-sm"
+          >
             {TIMEFRAMES.map((tf) => (
-              <option key={tf} value={tf}>{tf.toUpperCase()}</option>
+              <option key={tf} value={tf}>
+                {tf.toUpperCase()}
+              </option>
             ))}
           </select>
-          <select value={String(minScore)} onChange={(e) => setMinScore(Number(e.target.value))} className="input-field text-sm">
+          <select
+            value={String(minScore)}
+            onChange={(e) => setMinScore(Number(e.target.value))}
+            className="input-field text-sm"
+          >
             <option value="0">{t('all')}</option>
             <option value="60">{t('watch')} (60+)</option>
             <option value="70">{t('buy')} (70+)</option>
             <option value="80">{t('strong')} (80+)</option>
           </select>
           <select value={riskFilter} onChange={(e) => setRiskFilter(e.target.value)} className="input-field text-sm">
-            <option value="ALL">{t('risk')}: {t('all')}</option>
+            <option value="ALL">
+              {t('risk')}: {t('all')}
+            </option>
             <option value="LOW">{t('low')}</option>
             <option value="MEDIUM">{t('medium')}</option>
             <option value="HIGH">{t('high')}</option>
           </select>
-          <select value={signalFilter} onChange={(e) => setSignalFilter(e.target.value)} className="input-field text-sm">
-            <option value="ALL">{t('signal')}: {t('all')}</option>
+          <select
+            value={signalFilter}
+            onChange={(e) => setSignalFilter(e.target.value)}
+            className="input-field text-sm"
+          >
+            <option value="ALL">
+              {t('signal')}: {t('all')}
+            </option>
             <option value="BUY">{t('buy')}</option>
             <option value="WAIT">{t('wait')}</option>
             <option value="NO_TRADE">{t('noTrade')}</option>
           </select>
-          <button onClick={handleScan} disabled={loading} className="btn-primary text-sm">
+          <button onClick={() => void handleScan()} disabled={loading} className="btn-primary text-sm">
             {loading ? `${t('scanning')} ${progress}%` : t('scan')}
           </button>
         </div>
       </Card>
 
-      {/* Results */}
       {loading && progress < 100 && (
         <div className="space-y-2">
           <div className="w-full h-1.5 bg-surface-200 rounded-full overflow-hidden">
-            <div className="h-full bg-primary-500 rounded-full transition-all duration-300" style={{ width: `${progress}%` }} />
+            <div
+              className="h-full bg-primary-500 rounded-full transition-all duration-300"
+              style={{ width: `${progress}%` }}
+            />
           </div>
-          <p className="text-sm text-slate-400 text-center">{t('scanning')} {progress}%</p>
+          <p className="text-sm text-slate-400 text-center">
+            {t('scanning')} {progress}%
+          </p>
         </div>
       )}
 
-      {error && <ErrorState message={error} onRetry={handleScan} />}
+      {loading && progress >= 100 && <LoadingSpinner />}
+
+      {error && <ErrorState message={error} onRetry={() => void handleScan()} />}
 
       {!loading && !error && results.length > 0 && (
         <div className="card overflow-hidden">
@@ -189,13 +217,25 @@ if (result.signalType === 'BUY' && result.risk?.stopLoss && result.risk?.target1
                     onClick={() => navigate(`/asset/${r.symbol}`)}
                     className="hover:bg-surface-100 dark:hover:bg-surface-100 transition-colors cursor-pointer"
                   >
-                    <td className="px-4 py-3 font-semibold text-slate-100">{r.symbol.replace('USDT', '')}</td>
-                    <td className="px-4 py-3"><SignalBadge type={r.signalType} /></td>
-                    <td className="px-4 py-3"><ScoreBar score={r.score} /></td>
-                    <td className="px-4 py-3 hidden sm:table-cell"><TrendBadge trend={r.trend} /></td>
+                    <td className="px-4 py-3 font-semibold text-slate-100">
+                      {r.symbol.replace(/USDT$/i, '')}
+                    </td>
+                    <td className="px-4 py-3">
+                      <SignalBadge type={r.signalType} />
+                    </td>
+                    <td className="px-4 py-3">
+                      <ScoreBar score={r.score} />
+                    </td>
+                    <td className="px-4 py-3 hidden sm:table-cell">
+                      <TrendBadge trend={r.trend} />
+                    </td>
                     <td className="px-4 py-3 text-slate-300 hidden md:table-cell">{r.structure}</td>
-                    <td className="px-4 py-3 hidden md:table-cell"><RiskBadge level={r.riskLevel} /></td>
-                    <td className="px-4 py-3 text-slate-300 hidden lg:table-cell tabular-nums">{formatPrice(r.priceAtSignal, lang)}</td>
+                    <td className="px-4 py-3 hidden md:table-cell">
+                      <RiskBadge level={r.riskLevel} />
+                    </td>
+                    <td className="px-4 py-3 text-slate-300 hidden lg:table-cell tabular-nums">
+                      {formatPrice(r.priceAtSignal, lang)}
+                    </td>
                     <td className="px-4 py-3">
                       <ChevronRight className="w-4 h-4 text-slate-500" />
                     </td>
@@ -207,9 +247,7 @@ if (result.signalType === 'BUY' && result.risk?.stopLoss && result.risk?.target1
         </div>
       )}
 
-      {!loading && !error && results.length === 0 && (
-        <EmptyState message={t('noResults')} />
-      )}
+      {!loading && !error && results.length === 0 && <EmptyState message={t('noResults')} />}
 
       <Disclaimer />
     </div>
