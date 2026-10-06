@@ -18,6 +18,7 @@ import { SettingsPage } from '@/pages/SettingsPage';
 import { ProfilePage } from '@/pages/ProfilePage';
 import { LoadingSpinner } from '@/components/UI';
 import type { ReactNode } from 'react';
+import { SignalLabPage } from '@/pages/SignalLabPage';
 
 function AppRoute({ children }: { children: ReactNode }) {
   const { loading } = useAuth();
@@ -67,6 +68,7 @@ function AppRoutes() {
       <Route path="/performance" element={<AppRoute><PerformancePage /></AppRoute>} />
       <Route path="/settings" element={<AppRoute><SettingsPage /></AppRoute>} />
       <Route path="/profile" element={<AppRoute><ProfilePage /></AppRoute>} />
+      <Route path="/signal-lab" element={<AppRoute><SignalLabPage /></AppRoute>} />
 
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
