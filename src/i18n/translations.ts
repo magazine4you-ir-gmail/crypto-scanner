@@ -254,6 +254,24 @@ export const translations: Translations = {
   asStale: { fa: 'اسکن خودکار بیش از ۲ ساعت است که اجرا نشده. زمان‌بندی (cron) و تابع اسکن را در Supabase بررسی کنید.', en: 'The auto scan has not run for over 2 hours. Check the cron schedule and the scan function in Supabase.' },
   asLastFailed: { fa: 'آخرین اسکن با خطا تمام شد', en: 'The last scan failed' },
   asTablesMissing: { fa: 'جدول‌های اسکن خودکار هنوز ساخته نشده‌اند. فایل migration مربوط به auto_scan را در Supabase اجرا کنید.', en: 'The auto-scan tables do not exist yet. Run the auto_scan migration in Supabase.' },
+    // Signal Lab
+  signalLab: { fa: 'آزمایشگاه سیگنال', en: 'Signal Lab' },
+  slDescription: {
+    fa: 'سیگنال‌های BUY و SELL صادرشده توسط اسکن خودکار اینجا ثبت می‌شوند و با قیمت واقعی بازار ارزیابی می‌گردند (برد / باخت / منقضی).',
+    en: 'BUY and SELL signals from auto-scan are recorded here and evaluated against live market prices (win / loss / expired).',
+  },
+  slEvaluate: { fa: 'ارزیابی سیگنال‌های باز', en: 'Evaluate Open Signals' },
+  slEvaluating: { fa: 'در حال ارزیابی...', en: 'Evaluating...' },
+  slOpen: { fa: 'باز', en: 'Open' },
+  slExpired: { fa: 'منقضی', en: 'Expired' },
+  slCancelled: { fa: 'لغو شده', en: 'Cancelled' },
+  slNoData: {
+    fa: 'هنوز سیگنالی برای تست ثبت نشده. پس از اولین اسکن خودکار که سیگنال BUY/SELL بدهد، اینجا ظاهر می‌شود.',
+    en: 'No signals recorded yet. After the next auto-scan that produces BUY/SELL signals, they will appear here.',
+  },
+  slByTimeframe: { fa: 'بر اساس تایم‌فریم', en: 'By Timeframe' },
+  slByScore: { fa: 'بر اساس امتیاز', en: 'By Score' },
+  avgPnl: { fa: 'میانگین PnL', en: 'Avg PnL' },
 };
 
 export function t(key: string, lang: Lang): string {
