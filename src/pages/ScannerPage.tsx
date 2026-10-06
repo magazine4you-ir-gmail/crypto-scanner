@@ -65,7 +65,30 @@ export function ScannerPage() {
         }
         setProgress(Math.round(((i + 1) / symbols.length) * 100));
       }
+import { registerOutcomeFromSignal } from '@/services/outcomeService';
 
+// داخل حلقه، بعد از analyze:
+const result = analyze(symbol, timeframe, candles);
+allResults.push(result);
+saveSignal(result).catch(() => {});
+
+if (result.signalType === 'BUY' && result.risk?.stopLoss && result.risk?.target1) {
+  registerOutcomeFromSignal({
+    symbol: result.symbol,
+    baseAsset: result.symbol.replace('USDT', ''),
+    timeframe,
+    signalType: 'BUY',
+    score: result.score,
+    price: result.priceAtSignal,
+    entryLow: result.risk.entryLow,
+    entryHigh: result.risk.entryHigh,
+    stopLoss: result.risk.stopLoss,
+    target1: result.risk.target1,
+    target2: result.risk.target2,
+    riskReward: result.risk.riskReward,
+    source: 'manual_scan',
+  }).catch(() => {});
+}
       allResults.sort((a, b) => b.score - a.score);
       setResults(allResults);
     } catch (e) {
