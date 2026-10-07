@@ -62,10 +62,8 @@ export function ScannerPage() {
           const result = analyze(symbol, timeframe, candles);
           allResults.push(result);
 
-          // save to signals history (non-blocking)
           void saveSignal(result).catch(() => {});
 
-          // register BUY setups into Signal Lab (non-blocking)
           if (
             result.signalType === 'BUY' &&
             result.risk &&
