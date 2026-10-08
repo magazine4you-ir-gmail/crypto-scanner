@@ -15,11 +15,18 @@ import { SignalBadge, TrendBadge, RiskBadge, RegimeBadge, StructureBadge, ScoreB
 import { formatPrice, formatPercent, formatCompact, formatDate } from '@/i18n/format';
 import { TIMEFRAMES } from '@/types/market';
 import { ArrowLeft, Activity, BarChart3, Target, Shield, BookOpen } from 'lucide-react';
+import { useParams, Link, useSearchParams } from 'react-router-dom';
 
 export function AssetDetailPage() {
   const { symbol } = useParams<{ symbol: string }>();
   const { t, lang, settings } = useSettings();
-  const [timeframe, setTimeframe] = useState<Timeframe>((settings?.default_timeframe as Timeframe) ?? '1d');
+  const [timeframe, setTimeframe] = useState<Timeframe>(() => {
+  const fromUrl = searchParams.get('tf');
+    if (fromUrl && (TIMEFRAMES as readonly string[]).includes(fromUrl)) {
+      return fromUrl as Timeframe;
+    }
+    return (settings?.default_timeframe as Timeframe) ?? '1d';
+  });
   const [candles, setCandles] = useState<Candle[]>([]);
   const [signal, setSignal] = useState<SignalResult | null>(null);
   const [history, setHistory] = useState<SignalRecord[]>([]);
@@ -27,6 +34,9 @@ export function AssetDetailPage() {
   const [loading, setLoading] = useState(true);
   const [analyzing, setAnalyzing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [searchParams] = useSearchParams();
+  const outcomeId = searchParams.get('outcome');
+  const tfFromUrl = searchParams.get('tf') as Timeframe | null;
 
   const load = async () => {
     if (!symbol) return;
