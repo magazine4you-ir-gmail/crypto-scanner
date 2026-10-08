@@ -37,7 +37,10 @@ export const translations: Translations = {
   passwordsDontMatch: { fa: 'رمز عبور و تکرار آن یکسان نیستند', en: 'Passwords do not match' },
   registrationSuccess: { fa: 'ثبت‌نام موفق بود', en: 'Registration successful' },
   registrationFailed: { fa: 'ثبت‌نام ناموفق بود', en: 'Registration failed' },
-  checkEmail: { fa: 'ثبت‌نام انجام شد. لطفاً ایمیل خود را بررسی کرده و روی لینک تأیید کلیک کنید، سپس وارد شوید.', en: 'Registration complete. Please check your email and click the confirmation link, then sign in.' },
+  checkEmail: {
+    fa: 'ثبت‌نام انجام شد. لطفاً ایمیل خود را بررسی کرده و روی لینک تأیید کلیک کنید، سپس وارد شوید.',
+    en: 'Registration complete. Please check your email and click the confirmation link, then sign in.',
+  },
   resetLinkSent: { fa: 'لینک بازنشانی ارسال شد', en: 'Reset link sent' },
   welcomeBack: { fa: 'خوش آمدید', en: 'Welcome Back' },
   createAccount: { fa: 'ایجاد حساب کاربری', en: 'Create Account' },
@@ -141,7 +144,7 @@ export const translations: Translations = {
 
   // Journal
   journalTitle: { fa: 'ژورنال معاملات', en: 'Trading Journal' },
-  addEntry: { fa: 'افزودن记录', en: 'Add Entry' },
+  addEntry: { fa: 'افزودن رکورد', en: 'Add Entry' },
   addJournalEntry: { fa: 'افزودن معامله', en: 'Add Trade' },
   side: { fa: 'جهت', en: 'Side' },
   entry: { fa: 'ورود', en: 'Entry' },
@@ -236,6 +239,7 @@ export const translations: Translations = {
   paperTradingPerformance: { fa: 'عملکرد پیپر تریدینگ', en: 'Paper Trading Performance' },
   backtestPerformance: { fa: 'عملکرد بک‌تست', en: 'Backtest Performance' },
   comingSoon: { fa: 'به‌زودی', en: 'Coming Soon' },
+
   // Auto scan
   autoScan: { fa: 'اسکن خودکار', en: 'Auto Scan' },
   asDescription: {
@@ -249,12 +253,25 @@ export const translations: Translations = {
   asRefresh: { fa: 'بازخوانی', en: 'Refresh' },
   asTarget: { fa: 'هدف ۱', en: 'Target 1' },
   asSince: { fa: 'فعال از', en: 'Active since' },
-  asNoData: { fa: 'هنوز اسکنی انجام نشده. اولین اسکن خودکار حداکثر تا یک ساعت دیگر نتیجه می‌دهد.', en: 'No scan results yet. The first automatic scan will appear within an hour.' },
-  asLoginRequired: { fa: 'برای دیدن نتایج اسکن خودکار وارد حساب خود شوید.', en: 'Sign in to view the auto-scan results.' },
-  asStale: { fa: 'اسکن خودکار بیش از ۲ ساعت است که اجرا نشده. زمان‌بندی (cron) و تابع اسکن را در Supabase بررسی کنید.', en: 'The auto scan has not run for over 2 hours. Check the cron schedule and the scan function in Supabase.' },
+  asNoData: {
+    fa: 'هنوز اسکنی انجام نشده. اولین اسکن خودکار حداکثر تا یک ساعت دیگر نتیجه می‌دهد.',
+    en: 'No scan results yet. The first automatic scan will appear within an hour.',
+  },
+  asLoginRequired: {
+    fa: 'برای دیدن نتایج اسکن خودکار وارد حساب خود شوید.',
+    en: 'Sign in to view the auto-scan results.',
+  },
+  asStale: {
+    fa: 'اسکن خودکار بیش از ۲ ساعت است که اجرا نشده. زمان‌بندی (cron) و تابع اسکن را در Supabase بررسی کنید.',
+    en: 'The auto scan has not run for over 2 hours. Check the cron schedule and the scan function in Supabase.',
+  },
   asLastFailed: { fa: 'آخرین اسکن با خطا تمام شد', en: 'The last scan failed' },
-  asTablesMissing: { fa: 'جدول‌های اسکن خودکار هنوز ساخته نشده‌اند. فایل migration مربوط به auto_scan را در Supabase اجرا کنید.', en: 'The auto-scan tables do not exist yet. Run the auto_scan migration in Supabase.' },
-    // Signal Lab
+  asTablesMissing: {
+    fa: 'جدول‌های اسکن خودکار هنوز ساخته نشده‌اند. فایل migration مربوط به auto_scan را در Supabase اجرا کنید.',
+    en: 'The auto-scan tables do not exist yet. Run the auto_scan migration in Supabase.',
+  },
+
+  // Signal Lab
   signalLab: { fa: 'آزمایشگاه سیگنال', en: 'Signal Lab' },
   slDescription: {
     fa: 'سیگنال‌های BUY و SELL صادرشده توسط اسکن خودکار اینجا ثبت می‌شوند و با قیمت واقعی بازار ارزیابی می‌گردند (برد / باخت / منقضی).',
@@ -272,13 +289,8 @@ export const translations: Translations = {
   slByTimeframe: { fa: 'بر اساس تایم‌فریم', en: 'By Timeframe' },
   slByScore: { fa: 'بر اساس امتیاز', en: 'By Score' },
   avgPnl: { fa: 'میانگین PnL', en: 'Avg PnL' },
-};
 
-export function t(key: string, lang: Lang): string {
-  const entry = translations[key];
-  if (!entry) return key;
-  return entry[lang] ?? entry.en ?? key;
-}
+  // Lab / Live Analysis
   labSignal: { fa: 'سیگنال آزمایشگاه', en: 'Lab Signal' },
   liveAnalysis: { fa: 'تحلیل لحظه‌ای', en: 'Live Analysis' },
   labSignalHint: {
@@ -292,3 +304,10 @@ export function t(key: string, lang: Lang): string {
   backToLab: { fa: 'بازگشت به آزمایشگاه', en: 'Back to Signal Lab' },
   labResult: { fa: 'نتیجه آزمایش', en: 'Lab result' },
   source: { fa: 'منبع', en: 'Source' },
+};
+
+export function t(key: string, lang: Lang): string {
+  const entry = translations[key];
+  if (!entry) return key;
+  return entry[lang] ?? entry.en ?? key;
+}
