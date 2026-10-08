@@ -244,7 +244,9 @@ export function SignalLabPage() {
                       <tr
                         key={r.id}
                         className="hover:bg-surface-100 cursor-pointer"
-                        onClick={() => navigate(`/asset/${r.symbol}`)}
+                        onClick={() =>
+                          navigate(`/asset/${r.symbol}?tf=${encodeURIComponent(r.timeframe)}&outcome=${encodeURIComponent(r.id)}`)
+                        }
                       >
                         <td className="px-3 py-3 font-semibold text-slate-100">{r.base_asset}</td>
                         <td className="px-3 py-3 text-slate-300 uppercase">{r.timeframe}</td>
