@@ -15,6 +15,14 @@ import { SignalBadge, TrendBadge, RiskBadge, RegimeBadge, StructureBadge, ScoreB
 import { formatPrice, formatPercent, formatDate } from '@/i18n/format';
 import { TIMEFRAMES } from '@/types/market';
 import { ArrowLeft, Activity, BarChart3, Target, Shield, BookOpen } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { useParams, Link, useSearchParams } from 'react-router-dom';
+import {
+  fetchOutcomeById,
+  fetchOutcomesBySymbol,
+  type SignalOutcome,
+  type OutcomeStatus,
+} from '@/services/outcomeService';
 
 export function AssetDetailPage() {
   const { symbol } = useParams<{ symbol: string }>();
