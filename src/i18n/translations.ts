@@ -279,3 +279,16 @@ export function t(key: string, lang: Lang): string {
   if (!entry) return key;
   return entry[lang] ?? entry.en ?? key;
 }
+  labSignal: { fa: 'سیگنال آزمایشگاه', en: 'Lab Signal' },
+  liveAnalysis: { fa: 'تحلیل لحظه‌ای', en: 'Live Analysis' },
+  labSignalHint: {
+    fa: 'این همان سیگنالی است که اسکن خودکار ثبت کرده (ممکن است با تحلیل لحظه‌ای فرق داشته باشد).',
+    en: 'This is the signal recorded by auto-scan (it may differ from live analysis).',
+  },
+  liveAnalysisHint: {
+    fa: 'تحلیل فعلی موتور صفحه دارایی؛ شورت فقط در اسکن خودکار تولید می‌شود.',
+    en: 'Current client-engine analysis; SHORT signals come only from auto-scan.',
+  },
+  backToLab: { fa: 'بازگشت به آزمایشگاه', en: 'Back to Signal Lab' },
+  labResult: { fa: 'نتیجه آزمایش', en: 'Lab result' },
+  source: { fa: 'منبع', en: 'Source' },
