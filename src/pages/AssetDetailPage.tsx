@@ -4,6 +4,12 @@ import { useSettings } from '@/contexts/SettingsContext';
 import { fetchKlinesValidated, fetchTickers } from '@/services/marketData';
 import { analyze } from '@/engine/signalEngine';
 import { saveSignal, getSignalHistory } from '@/services/signalService';
+import {
+  fetchOutcomeById,
+  fetchOutcomesBySymbol,
+  type SignalOutcome,
+  type OutcomeStatus,
+} from '@/services/outcomeService';
 import { findSwingPoints } from '@/engine/marketStructure';
 import { findSupportResistance as findSR } from '@/engine/supportResistance';
 import type { Candle, Timeframe, TickerStat } from '@/types/market';
@@ -15,14 +21,6 @@ import { SignalBadge, TrendBadge, RiskBadge, RegimeBadge, StructureBadge, ScoreB
 import { formatPrice, formatPercent, formatDate } from '@/i18n/format';
 import { TIMEFRAMES } from '@/types/market';
 import { ArrowLeft, Activity, BarChart3, Target, Shield, BookOpen } from 'lucide-react';
-import { useEffect, useState } from 'react';
-import { useParams, Link, useSearchParams } from 'react-router-dom';
-import {
-  fetchOutcomeById,
-  fetchOutcomesBySymbol,
-  type SignalOutcome,
-  type OutcomeStatus,
-} from '@/services/outcomeService';
 
 export function AssetDetailPage() {
   const { symbol } = useParams<{ symbol: string }>();
@@ -43,12 +41,13 @@ export function AssetDetailPage() {
   const [candles, setCandles] = useState<Candle[]>([]);
   const [signal, setSignal] = useState<SignalResult | null>(null);
   const [history, setHistory] = useState<SignalRecord[]>([]);
+  const [labOutcome, setLabOutcome] = useState<SignalOutcome | null>(null);
+  const [labHistory, setLabHistory] = useState<SignalOutcome[]>([]);
   const [ticker, setTicker] = useState<TickerStat | null>(null);
   const [loading, setLoading] = useState(true);
   const [analyzing, setAnalyzing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Keep timeframe in sync when arriving from Signal Lab with ?tf=
   useEffect(() => {
     if (tfFromUrl && (TIMEFRAMES as readonly string[]).includes(tfFromUrl) && tfFromUrl !== timeframe) {
       setTimeframe(tfFromUrl as Timeframe);
@@ -62,7 +61,8 @@ export function AssetDetailPage() {
     setError(null);
     try {
       const fullSymbol = symbol.endsWith('USDT') ? symbol : `${symbol}USDT`;
-      const [klineData, hist, tickers] = await Promise.all([
+
+      const [klineData, hist, tickers, outcomes] = await Promise.all([
         fetchKlinesValidated(fullSymbol, timeframe, 400).catch(() => ({
           candles: [] as Candle[],
           validation: {
@@ -75,10 +75,30 @@ export function AssetDetailPage() {
         })),
         getSignalHistory(fullSymbol, 10).catch(() => []),
         fetchTickers([fullSymbol]).catch(() => []),
+        fetchOutcomesBySymbol(fullSymbol, 40).catch(() => [] as SignalOutcome[]),
       ]);
+
       setCandles(klineData.candles);
       setHistory(hist);
       setTicker(tickers[0] ?? null);
+      setLabHistory(outcomes);
+
+      if (outcomeId) {
+        const fromList = outcomes.find((o) => o.id === outcomeId);
+        if (fromList) {
+          setLabOutcome(fromList);
+        } else {
+          try {
+            const one = await fetchOutcomeById(outcomeId);
+            setLabOutcome(one);
+          } catch {
+            setLabOutcome(null);
+          }
+        }
+      } else {
+        setLabOutcome(null);
+      }
+
       if (klineData.candles.length >= 50) {
         const result = analyze(fullSymbol, timeframe, klineData.candles);
         setSignal(result);
@@ -95,7 +115,7 @@ export function AssetDetailPage() {
   useEffect(() => {
     void load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [symbol, timeframe]);
+  }, [symbol, timeframe, outcomeId]);
 
   const handleAnalyze = async () => {
     if (!symbol || candles.length < 50) return;
@@ -120,13 +140,26 @@ export function AssetDetailPage() {
   const supportPrices = levels.filter((l) => l.type === 'SUPPORT').slice(0, 3).map((l) => l.price);
   const resistancePrices = levels.filter((l) => l.type === 'RESISTANCE').slice(0, 3).map((l) => l.price);
 
-  // Reserved for Stage 2 (load stored lab outcome by id)
-  void outcomeId;
+  const chartEntry =
+    labOutcome?.entry_high != null ? Number(labOutcome.entry_high) : signal?.risk?.entryHigh ?? null;
+  const chartStop =
+    labOutcome?.stop_loss != null ? Number(labOutcome.stop_loss) : signal?.risk?.stopLoss ?? null;
+  const chartTargets = labOutcome
+    ? ([Number(labOutcome.target1), labOutcome.target2 != null ? Number(labOutcome.target2) : null].filter(
+        (x): x is number => x != null && Number.isFinite(x),
+      ) as number[])
+    : signal?.risk
+      ? [signal.risk.target1, signal.risk.target2, signal.risk.target3]
+      : undefined;
 
   return (
     <div className="space-y-6">
       <div className="flex items-center gap-4">
-        <Link to="/scanner" className="p-2 rounded-lg hover:bg-surface-100 text-slate-400">
+        <Link
+          to={outcomeId ? '/signal-lab' : '/scanner'}
+          className="p-2 rounded-lg hover:bg-surface-100 text-slate-400"
+          title={outcomeId ? t('backToLab') : undefined}
+        >
           <ArrowLeft className="w-5 h-5 rtl:rotate-180" />
         </Link>
         <div>
@@ -148,7 +181,6 @@ export function AssetDetailPage() {
         </div>
       </div>
 
-      {/* Timeframe selector */}
       <div className="flex gap-2 flex-wrap">
         {TIMEFRAMES.map((tf) => (
           <button
@@ -165,7 +197,6 @@ export function AssetDetailPage() {
         ))}
       </div>
 
-      {/* Chart */}
       <Card>
         <SectionTitle>
           <span className="flex items-center gap-2">
@@ -179,9 +210,9 @@ export function AssetDetailPage() {
             showEMA20
             showEMA50
             showEMA200
-            entryLevel={signal?.risk?.entryHigh ?? null}
-            stopLevel={signal?.risk?.stopLoss ?? null}
-            targetLevels={signal?.risk ? [signal.risk.target1, signal.risk.target2, signal.risk.target3] : undefined}
+            entryLevel={chartEntry}
+            stopLevel={chartStop}
+            targetLevels={chartTargets}
             supportLevels={supportPrices}
             resistanceLevels={resistancePrices}
           />
@@ -190,19 +221,79 @@ export function AssetDetailPage() {
         )}
       </Card>
 
-      {/* Live analysis (client engine — may differ from auto-scan SHORT) */}
+      {labOutcome && (
+        <Card>
+          <SectionTitle>
+            <span className="flex items-center gap-2">
+              <Target className="w-5 h-5 text-warning-400" /> {t('labSignal')}
+            </span>
+          </SectionTitle>
+          <p className="text-xs text-slate-400 mb-4">{t('labSignalHint')}</p>
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4 mb-4">
+            <InfoBox label={t('signal')}>
+              <span className={labOutcome.signal_type === 'BUY' ? 'signal-buy' : 'signal-sell'}>
+                {labOutcome.signal_type === 'BUY' ? t('buy') : t('asShort')}
+              </span>
+            </InfoBox>
+            <InfoBox label={t('score')}>
+              <ScoreBar score={labOutcome.score} />
+            </InfoBox>
+            <InfoBox label={t('timeframe')}>
+              <span className="text-slate-200 uppercase font-medium">{labOutcome.timeframe}</span>
+            </InfoBox>
+            <InfoBox label={t('labResult')}>
+              <LabStatus status={labOutcome.status} t={t} />
+            </InfoBox>
+            <InfoBox label={t('price')}>
+              <span className="text-slate-200 tabular-nums">
+                {formatPrice(Number(labOutcome.price_at_signal), lang)}
+              </span>
+            </InfoBox>
+            <InfoBox label={t('stopLoss')}>
+              <span className="text-error-400 tabular-nums">
+                {formatPrice(Number(labOutcome.stop_loss), lang)}
+              </span>
+            </InfoBox>
+            <InfoBox label={t('target1')}>
+              <span className="text-success-400 tabular-nums">
+                {formatPrice(Number(labOutcome.target1), lang)}
+              </span>
+            </InfoBox>
+            <InfoBox label="PnL">
+              {labOutcome.pnl_pct != null ? (
+                <span
+                  className={
+                    Number(labOutcome.pnl_pct) >= 0
+                      ? 'text-success-400 font-semibold'
+                      : 'text-error-400 font-semibold'
+                  }
+                >
+                  {formatPercent(Number(labOutcome.pnl_pct), lang)}
+                </span>
+              ) : (
+                <span className="text-slate-500">—</span>
+              )}
+            </InfoBox>
+          </div>
+          <p className="text-xs text-slate-500">
+            {t('source')}: {labOutcome.source} · {formatDate(labOutcome.signal_at, lang)}
+          </p>
+        </Card>
+      )}
+
       {signal && (
         <Card>
-          <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center justify-between mb-2">
             <SectionTitle className="mb-0">
               <span className="flex items-center gap-2">
-                <Activity className="w-5 h-5 text-primary-400" /> {t('signal')}
+                <Activity className="w-5 h-5 text-primary-400" /> {t('liveAnalysis')}
               </span>
             </SectionTitle>
             <button onClick={() => void handleAnalyze()} disabled={analyzing} className="btn-secondary text-sm">
               {analyzing ? t('analyzing') : t('generateSignal')}
             </button>
           </div>
+          <p className="text-xs text-slate-400 mb-4">{t('liveAnalysisHint')}</p>
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4 mb-4">
             <InfoBox label={t('signal')}>
               <SignalBadge type={signal.signalType} />
@@ -304,7 +395,67 @@ export function AssetDetailPage() {
         </Card>
       )}
 
-      {/* Signal History */}
+      {labHistory.length > 0 && (
+        <Card>
+          <SectionTitle>
+            <span className="flex items-center gap-2">
+              <BookOpen className="w-5 h-5 text-primary-400" /> {t('signalLab')} — {t('signalHistory')}
+            </span>
+          </SectionTitle>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="text-slate-400">
+                <tr>
+                  <th className="px-3 py-2 text-start font-medium">{t('timeframe')}</th>
+                  <th className="px-3 py-2 text-start font-medium">{t('signal')}</th>
+                  <th className="px-3 py-2 text-start font-medium">{t('score')}</th>
+                  <th className="px-3 py-2 text-start font-medium">{t('labResult')}</th>
+                  <th className="px-3 py-2 text-start font-medium">PnL</th>
+                  <th className="px-3 py-2 text-start font-medium">{t('date')}</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-surface-200">
+                {labHistory.map((h) => (
+                  <tr
+                    key={h.id}
+                    className={`cursor-pointer hover:bg-surface-100 ${
+                      labOutcome?.id === h.id ? 'bg-primary-600/10' : ''
+                    }`}
+                    onClick={() => {
+                      setLabOutcome(h);
+                      if ((TIMEFRAMES as readonly string[]).includes(h.timeframe)) {
+                        setTimeframe(h.timeframe as Timeframe);
+                      }
+                    }}
+                  >
+                    <td className="px-3 py-2 uppercase text-slate-300">{h.timeframe}</td>
+                    <td className="px-3 py-2">
+                      <span className={h.signal_type === 'BUY' ? 'signal-buy' : 'signal-sell'}>
+                        {h.signal_type === 'BUY' ? t('buy') : t('asShort')}
+                      </span>
+                    </td>
+                    <td className="px-3 py-2 text-slate-300 tabular-nums">{h.score}</td>
+                    <td className="px-3 py-2">
+                      <LabStatus status={h.status} t={t} />
+                    </td>
+                    <td className="px-3 py-2 tabular-nums">
+                      {h.pnl_pct != null ? (
+                        <span className={Number(h.pnl_pct) >= 0 ? 'text-success-400' : 'text-error-400'}>
+                          {formatPercent(Number(h.pnl_pct), lang)}
+                        </span>
+                      ) : (
+                        '—'
+                      )}
+                    </td>
+                    <td className="px-3 py-2 text-slate-400">{formatDate(h.signal_at, lang)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </Card>
+      )}
+
       {history.length > 0 && (
         <Card>
           <SectionTitle>
@@ -373,4 +524,22 @@ function RiskBox({
       <p className={`text-sm font-semibold ${color}`}>{value}</p>
     </div>
   );
+}
+
+function LabStatus({ status, t }: { status: OutcomeStatus; t: (k: string) => string }) {
+  const map: Record<OutcomeStatus, string> = {
+    OPEN: 'text-warning-400',
+    WIN: 'text-success-400',
+    LOSS: 'text-error-400',
+    EXPIRED: 'text-slate-400',
+    CANCELLED: 'text-slate-500',
+  };
+  const label: Record<OutcomeStatus, string> = {
+    OPEN: t('open'),
+    WIN: t('win'),
+    LOSS: t('loss'),
+    EXPIRED: t('slExpired'),
+    CANCELLED: t('slCancelled'),
+  };
+  return <span className={`font-medium ${map[status]}`}>{label[status]}</span>;
 }
