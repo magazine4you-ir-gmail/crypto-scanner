@@ -299,3 +299,26 @@ export async function registerOutcomeFromSignal(input: {
   }
   return true;
 }
+export async function fetchOutcomeById(id: string): Promise<SignalOutcome | null> {
+  const { data, error } = await supabase
+    .from('signal_outcomes')
+    .select('*')
+    .eq('id', id)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  return (data as SignalOutcome) ?? null;
+}
+
+export async function fetchOutcomesBySymbol(
+  symbol: string,
+  limit = 30,
+): Promise<SignalOutcome[]> {
+  const { data, error } = await supabase
+    .from('signal_outcomes')
+    .select('*')
+    .eq('symbol', symbol)
+    .order('signal_at', { ascending: false })
+    .limit(limit);
+  if (error) throw new Error(error.message);
+  return (data ?? []) as SignalOutcome[];
+}
