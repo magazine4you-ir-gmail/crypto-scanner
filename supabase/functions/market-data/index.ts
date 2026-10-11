@@ -152,9 +152,10 @@ async function handleExchangeInfo() {
   }
   const data = await res.json();
 
-  const symbols = (data as any).symbols
-    .filter((s: any) => s.status === "TRADING" && s.quoteAsset === "USDT" && s.isSpotTradingAllowed)
-    .map((s: any) => ({ symbol: s.symbol, baseAsset: s.baseAsset, quoteAsset: s.quoteAsset }));
+  const raw = (data as { symbols: Record<string, unknown>[] }).symbols;
+  const symbols = raw
+    .filter((s) => s.status === "TRADING" && s.quoteAsset === "USDT" && s.isSpotTradingAllowed)
+    .map((s) => ({ symbol: s.symbol, baseAsset: s.baseAsset, quoteAsset: s.quoteAsset }));
 
   await writeCache("binance", "exchangeInfoFiltered", symbols, TTL.exchangeInfo);
 
@@ -241,6 +242,12 @@ Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { status: 200, headers: corsHeaders });
   }
+
+  // Only signed-in users may use the proxy (the anon key alone is not enough): it spends our API quota.
+  const token = (req.headers.get("Authorization") ?? "").replace(/^Bearer\s+/i, "").trim();
+  if (!token) return jsonResponse({ error: "unauthorized" }, 401);
+  const { data: authData, error: authError } = await supabase.auth.getUser(token);
+  if (authError || !authData.user) return jsonResponse({ error: "unauthorized" }, 401);
 
   try {
     const url = new URL(req.url);
