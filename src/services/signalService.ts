@@ -20,14 +20,16 @@ export interface SignalRecord {
   target3: number | null;
   risk_reward: number | null;
   price_at_signal: number;
-  factors: any[];
+  factors: unknown[];
   reasons: string[];
   explanation_fa: string;
   explanation_en: string;
   created_at: string;
 }
 
+/** Saves a signal from a manual analysis. Only actionable results are stored (no NO_TRADE noise). */
 export async function saveSignal(signal: SignalResult): Promise<void> {
+  if (signal.signalType === 'NO_TRADE') return;
   try {
     const { error } = await supabase.from('signals').insert({
       symbol: signal.symbol,
