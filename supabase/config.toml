@@ -1,0 +1,10 @@
+# Minimal Supabase CLI config. Only what is needed so `supabase functions deploy` behaves.
+project_id = "crypto-scanner"
+
+# The scheduled scan is called by pg_cron with an `x-cron-secret` header, not with a user JWT.
+[functions.scheduled-scan]
+verify_jwt = false
+
+# The market-data proxy validates the user's JWT itself (see index.ts).
+[functions.market-data]
+verify_jwt = false
