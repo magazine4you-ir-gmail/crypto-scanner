@@ -35,6 +35,8 @@ const navItems = [
   { key: 'profile', path: '/profile', icon: UserIcon },
 ];
 
+const bottomItems = [navItems[0], navItems[2], navItems[1], navItems[3]];
+
 export function Layout({ children }: { children: React.ReactNode }) {
   const { t } = useSettings();
   const { user, signOut } = useAuth();
@@ -109,7 +111,8 @@ export function Layout({ children }: { children: React.ReactNode }) {
       </aside>
 
       {/* Mobile header */}
-      <div className="lg:hidden fixed top-0 inset-x-0 h-16 z-40 flex items-center justify-between px-4 border-b border-surface-200 dark:border-surface-200 bg-surface-50 dark:bg-surface-50">
+      <div className="lg:hidden fixed top-0 inset-x-0 z-40 safe-top border-b border-surface-200 dark:border-surface-200 bg-surface-50 dark:bg-surface-50">
+        <div className="h-14 flex items-center justify-between px-4">
         <div className="flex items-center gap-2">
           <div className="w-8 h-8 rounded-lg bg-primary-600 flex items-center justify-center">
             <LineChart className="w-4 h-4 text-white" />
@@ -123,13 +126,14 @@ export function Layout({ children }: { children: React.ReactNode }) {
         >
           {mobileOpen ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
         </button>
+        </div>
       </div>
 
       {/* Mobile nav drawer */}
       {mobileOpen && (
         <div className="lg:hidden fixed inset-0 z-50 bg-surface-0/80 backdrop-blur-sm" onClick={() => setMobileOpen(false)}>
           <div
-            className="absolute top-16 inset-x-0 bg-surface-50 dark:bg-surface-50 border-b border-surface-200 dark:border-surface-200 p-3 space-y-1 animate-slide-up"
+            className="absolute top-14 inset-x-0 max-h-[calc(100dvh-3.5rem-4rem)] overflow-y-auto overscroll-contain bg-surface-50 dark:bg-surface-50 border-b border-surface-200 dark:border-surface-200 p-3 space-y-1 animate-slide-up"
             onClick={(e) => e.stopPropagation()}
           >
             {navItems.map((item) => (
@@ -172,9 +176,38 @@ export function Layout({ children }: { children: React.ReactNode }) {
       )}
 
       {/* Main content */}
-      <main className="flex-1 lg:ms-0 pt-16 lg:pt-0 min-w-0">
-        <div className="p-4 sm:p-6 lg:p-8 max-w-7xl mx-auto animate-fade-in">{children}</div>
+      <main className="flex-1 lg:ms-0 pt-[calc(3.5rem+env(safe-area-inset-top))] pb-[calc(4.25rem+env(safe-area-inset-bottom))] lg:pt-0 lg:pb-0 min-w-0">
+        <div className="p-3 sm:p-6 lg:p-8 max-w-7xl mx-auto animate-fade-in">{children}</div>
       </main>
+
+      {/* Mobile bottom tab bar */}
+      <nav className="lg:hidden fixed bottom-0 inset-x-0 z-40 safe-bottom border-t border-surface-200 dark:border-surface-200 bg-surface-50 dark:bg-surface-50">
+        <div className="grid grid-cols-5 h-16">
+          {bottomItems.map((item) => (
+            <NavLink
+              key={item.key}
+              to={item.path}
+              end={item.path === '/'}
+              onClick={() => setMobileOpen(false)}
+              className={({ isActive }) =>
+                `flex flex-col items-center justify-center gap-0.5 text-[11px] font-medium transition-colors ${
+                  isActive ? 'text-primary-400' : 'text-slate-400'
+                }`
+              }
+            >
+              <item.icon className="w-5 h-5" />
+              <span className="truncate max-w-full px-1">{t(item.key)}</span>
+            </NavLink>
+          ))}
+          <button
+            onClick={() => setMobileOpen(!mobileOpen)}
+            className={`flex flex-col items-center justify-center gap-0.5 text-[11px] font-medium ${mobileOpen ? 'text-primary-400' : 'text-slate-400'}`}
+          >
+            <Menu className="w-5 h-5" />
+            <span>{t('moreMenu')}</span>
+          </button>
+        </div>
+      </nav>
     </div>
   );
 }
