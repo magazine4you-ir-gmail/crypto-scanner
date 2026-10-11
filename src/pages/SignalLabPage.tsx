@@ -12,6 +12,7 @@ import { fetchLatestScanRun, type ScanRunRow } from '@/services/scanService';
 
 type Tab = 'ALL' | 'OPEN' | 'WIN' | 'LOSS' | 'EXPIRED';
 type Dir = 'ALL' | 'BUY' | 'SELL';
+type Source = 'auto_scan' | 'manual_track' | 'ALL';
 
 export function SignalLabPage() {
   const { t, lang } = useSettings();
@@ -25,6 +26,7 @@ export function SignalLabPage() {
   const [tab, setTab] = useState<Tab>('ALL');
   const [tf, setTf] = useState('ALL');
   const [dir, setDir] = useState<Dir>('ALL');
+  const [source, setSource] = useState<Source>('auto_scan');
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -49,18 +51,20 @@ export function SignalLabPage() {
     void load();
   }, [authLoading, user, load]);
 
-  const stats = useMemo(() => computeStats(rows), [rows]);
-  const timeframes = useMemo(() => Array.from(new Set(rows.map((r) => r.timeframe))).sort(), [rows]);
+  // statistics follow the selected source, so auto-scan and manual-tracking numbers are never mixed
+  const sourceRows = useMemo(() => rows.filter((r) => source === 'ALL' || r.source === source), [rows, source]);
+  const stats = useMemo(() => computeStats(sourceRows), [sourceRows]);
+  const timeframes = useMemo(() => Array.from(new Set(sourceRows.map((r) => r.timeframe))).sort(), [sourceRows]);
 
   const filtered = useMemo(
     () =>
-      rows.filter((r) => {
+      sourceRows.filter((r) => {
         if (tab !== 'ALL' && r.status !== tab) return false;
         if (tf !== 'ALL' && r.timeframe !== tf) return false;
         if (dir !== 'ALL' && r.signal_type !== dir) return false;
         return true;
       }),
-    [rows, tab, tf, dir],
+    [sourceRows, tab, tf, dir],
   );
 
   if (!authLoading && !user) {
@@ -96,6 +100,16 @@ export function SignalLabPage() {
       </div>
 
       <p className="text-sm text-slate-400 leading-6">{t('slDescription')}</p>
+      <p className="text-xs text-slate-500 leading-5">{t('trackNote')}</p>
+      <PillRow>
+        {([
+          ['auto_scan', t('slSourceAuto')],
+          ['manual_track', t('slSourceManual')],
+          ['ALL', t('slSourceAll')],
+        ] as [Source, string][]).map(([key, label]) => (
+          <Pill key={key} active={source === key} onClick={() => setSource(key)}>{label}</Pill>
+        ))}
+      </PillRow>
       {lastEval && (
         <p className="text-[11px] text-slate-500">
           {t('lastScanOutcomes')}: {formatDate(lastEval, lang)}
@@ -172,7 +186,7 @@ export function SignalLabPage() {
             </div>
           </Card>
 
-          {rows.length === 0 ? (
+          {sourceRows.length === 0 ? (
             <EmptyState message={t('slNoData')} />
           ) : filtered.length === 0 ? (
             <EmptyState message={t('noResults')} />
@@ -187,6 +201,7 @@ export function SignalLabPage() {
                         <div className="flex items-center gap-2 flex-wrap">
                           <span className="text-base font-bold text-slate-100">{r.base_asset}</span>
                           <Chip>{r.timeframe}</Chip>
+                          {r.source === 'manual_track' && <Chip tone="bg-primary-500/20 text-primary-300">{t('slManualBadge')}</Chip>}
                         </div>
                         <div className="flex items-center gap-2 mt-1.5">
                           <span className={r.signal_type === 'BUY' ? 'signal-buy' : 'signal-sell'}>{r.signal_type === 'BUY' ? t('buy') : t('asShort')}</span>
@@ -226,7 +241,10 @@ export function SignalLabPage() {
                     <tbody className="divide-y divide-surface-200">
                       {filtered.map((r) => (
                         <tr key={r.id} className="hover:bg-surface-100 cursor-pointer" onClick={() => open(r)}>
-                          <td className="px-3 py-3 font-semibold text-slate-100">{r.base_asset}</td>
+                          <td className="px-3 py-3 font-semibold text-slate-100 whitespace-nowrap">
+                            {r.base_asset}
+                            {r.source === 'manual_track' && <span className="ms-2 align-middle"><Chip tone="bg-primary-500/20 text-primary-300">{t('slManualBadge')}</Chip></span>}
+                          </td>
                           <td className="px-3 py-3 text-slate-300 uppercase">{r.timeframe}</td>
                           <td className="px-3 py-3">
                             <span className={r.signal_type === 'BUY' ? 'signal-buy' : 'signal-sell'}>{r.signal_type === 'BUY' ? t('buy') : t('asShort')}</span>
