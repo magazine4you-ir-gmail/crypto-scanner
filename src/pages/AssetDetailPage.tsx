@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { useParams, Link, useSearchParams } from 'react-router-dom';
 import { useSettings } from '@/contexts/SettingsContext';
 import { fetchKlinesValidated, fetchTickers } from '@/services/marketData';
-import { analyze } from '@/engine/signalEngine';
+import { analyze, optionsFromSettings } from '@/engine/signalEngine';
 import { saveSignal, getSignalHistory } from '@/services/signalService';
 import {
   fetchOutcomeById,
@@ -100,7 +100,7 @@ export function AssetDetailPage() {
       }
 
       if (klineData.candles.length >= 50) {
-        const result = analyze(fullSymbol, timeframe, klineData.candles);
+        const result = analyze(fullSymbol, timeframe, klineData.candles, optionsFromSettings(settings));
         setSignal(result);
       } else {
         setSignal(null);
@@ -122,7 +122,7 @@ export function AssetDetailPage() {
     setAnalyzing(true);
     try {
       const fullSymbol = symbol.endsWith('USDT') ? symbol : `${symbol}USDT`;
-      const result = analyze(fullSymbol, timeframe, candles);
+      const result = analyze(fullSymbol, timeframe, candles, optionsFromSettings(settings));
       setSignal(result);
       await saveSignal(result).catch(() => {});
     } finally {
@@ -133,9 +133,8 @@ export function AssetDetailPage() {
   if (loading) return <LoadingSpinner size="lg" />;
   if (error) return <ErrorState message={error} onRetry={() => void load()} />;
 
-  const fullSymbol = symbol?.endsWith('USDT') ? symbol : `${symbol}USDT`;
   const baseSymbol = symbol?.replace(/USDT$/i, '') ?? '';
-  const swings = candles.length > 10 ? findSwingPoints(candles, 2) : [];
+  const swings = candles.length > 10 ? findSwingPoints(candles, 3) : [];
   const levels = candles.length > 10 ? findSR(candles, swings) : [];
   const supportPrices = levels.filter((l) => l.type === 'SUPPORT').slice(0, 3).map((l) => l.price);
   const resistancePrices = levels.filter((l) => l.type === 'RESISTANCE').slice(0, 3).map((l) => l.price);
@@ -153,8 +152,8 @@ export function AssetDetailPage() {
       : undefined;
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center gap-4">
+    <div className="space-y-4 sm:space-y-6">
+      <div className="flex items-center gap-3 sm:gap-4">
         <Link
           to={outcomeId ? '/signal-lab' : '/scanner'}
           className="p-2 rounded-lg hover:bg-surface-100 text-slate-400"
@@ -163,7 +162,7 @@ export function AssetDetailPage() {
           <ArrowLeft className="w-5 h-5 rtl:rotate-180" />
         </Link>
         <div>
-          <h1 className="text-2xl font-bold text-slate-100">{baseSymbol}/USDT</h1>
+          <h1 className="text-xl sm:text-2xl font-bold text-slate-100">{baseSymbol}/USDT</h1>
           {ticker && (
             <div className="flex items-center gap-3 mt-1">
               <span className="text-lg font-semibold text-slate-200">
@@ -181,12 +180,12 @@ export function AssetDetailPage() {
         </div>
       </div>
 
-      <div className="flex gap-2 flex-wrap">
+      <div className="flex gap-2 overflow-x-auto no-scrollbar pb-1">
         {TIMEFRAMES.map((tf) => (
           <button
             key={tf}
             onClick={() => setTimeframe(tf)}
-            className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+            className={`shrink-0 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
               timeframe === tf
                 ? 'bg-primary-600 text-white'
                 : 'bg-surface-100 dark:bg-surface-100 text-slate-400 hover:text-slate-200'
@@ -309,6 +308,9 @@ export function AssetDetailPage() {
             </InfoBox>
             <InfoBox label={t('marketRegime')}>
               <RegimeBadge regime={signal.regime} />
+            </InfoBox>
+            <InfoBox label={t('candleClosed')}>
+              <span className="text-sm text-slate-200">{signal.candleCloseTime ? formatDate(signal.candleCloseTime, lang) : '—'}</span>
             </InfoBox>
             <InfoBox label={t('risk')}>
               <RiskBadge level={signal.riskLevel} />
@@ -469,7 +471,7 @@ export function AssetDetailPage() {
                 <tr>
                   <th className="px-3 py-2 text-start font-medium">{t('signal')}</th>
                   <th className="px-3 py-2 text-start font-medium">{t('score')}</th>
-                  <th className="px-3 py-2 text-start font-medium hidden sm:table-cell">{t('trend')}</th>
+                  <th className="px-3 py-2 text-start font-medium">{t('trend')}</th>
                   <th className="px-3 py-2 text-start font-medium">{t('date')}</th>
                 </tr>
               </thead>
@@ -480,8 +482,8 @@ export function AssetDetailPage() {
                       <SignalBadge type={h.signal_type as SignalResult['signalType']} />
                     </td>
                     <td className="px-3 py-2 text-slate-300 tabular-nums">{h.score}</td>
-                    <td className="px-3 py-2 text-slate-300 hidden sm:table-cell">{h.trend}</td>
-                    <td className="px-3 py-2 text-slate-400">{formatDate(h.created_at, lang)}</td>
+                    <td className="px-3 py-2 text-slate-300">{h.trend}</td>
+                    <td className="px-3 py-2 text-slate-400 whitespace-nowrap">{formatDate(h.created_at, lang)}</td>
                   </tr>
                 ))}
               </tbody>
