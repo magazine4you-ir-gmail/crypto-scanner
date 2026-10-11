@@ -124,12 +124,12 @@ export function PerformancePage() {
         <Card>
           <SectionTitle>{t('journalTitle')}</SectionTitle>
           <div className="overflow-x-auto">
-            <table className="w-full text-sm">
+            <table className="w-full text-sm min-w-[640px]">
               <thead className="text-slate-400">
                 <tr>
                   <th className="px-3 py-2 text-start font-medium">{t('asset')}</th>
                   <th className="px-3 py-2 text-start font-medium">{t('result')}</th>
-                  <th className="px-3 py-2 text-start font-medium hidden sm:table-cell">{t('date')}</th>
+                  <th className="px-3 py-2 text-start font-medium">{t('date')}</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-surface-200 dark:divide-surface-200">
@@ -139,7 +139,7 @@ export function PerformancePage() {
                     <td className={`px-3 py-2 font-medium ${e.result === 'WIN' ? 'text-success-400' : e.result === 'LOSS' ? 'text-error-400' : 'text-slate-400'}`}>
                       {e.result === 'WIN' ? t('win') : e.result === 'LOSS' ? t('loss') : e.result === 'BREAKEVEN' ? t('breakeven') : t('open')}
                     </td>
-                    <td className="px-3 py-2 text-slate-400 hidden sm:table-cell">{formatDate(e.trade_date, lang)}</td>
+                    <td className="px-3 py-2 text-slate-400">{formatDate(e.trade_date, lang)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -153,7 +153,17 @@ export function PerformancePage() {
   );
 }
 
-function StatCard({ icon: Icon, label, value, color = 'text-slate-100' }: any) {
+function StatCard({
+  icon: Icon,
+  label,
+  value,
+  color = 'text-slate-100',
+}: {
+  icon: React.ComponentType<{ className?: string }>;
+  label: string;
+  value: React.ReactNode;
+  color?: string;
+}) {
   return (
     <Card className="p-4">
       <div className="flex items-center gap-2 mb-2">
