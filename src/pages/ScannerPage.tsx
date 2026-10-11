@@ -9,6 +9,7 @@ import { TIMEFRAMES } from '@/types/market';
 import { Card, LoadingSpinner, ErrorState, EmptyState, Disclaimer } from '@/components/UI';
 import { SignalBadge, TrendBadge, RiskBadge, ScoreBar } from '@/components/Badges';
 import { Metric, TimeStamp, Chip } from '@/components/Responsive';
+import { TrackButton } from '@/components/TrackButton';
 import { formatPrice, formatNumber, formatDate } from '@/i18n/format';
 import { Radar, Filter, ChevronRight } from 'lucide-react';
 
@@ -181,10 +182,13 @@ export function ScannerPage() {
         <>
           <div className="md:hidden space-y-2.5">
             {filtered.map(({ result: r, rank }) => (
-              <button
+              <div
                 key={r.symbol}
+                role="button"
+                tabIndex={0}
                 onClick={() => navigate(`/asset/${r.symbol}?tf=${timeframe}`)}
-                className="card w-full text-start p-3 space-y-3 active:bg-surface-100"
+                onKeyDown={(e) => e.key === 'Enter' && navigate(`/asset/${r.symbol}?tf=${timeframe}`)}
+                className="card w-full text-start p-3 space-y-3 active:bg-surface-100 cursor-pointer"
               >
                 <div className="flex items-start justify-between gap-2">
                   <div className="min-w-0">
@@ -214,16 +218,17 @@ export function ScannerPage() {
                   <span className="text-xs text-slate-400">{r.structure}</span>
                   <TimeStamp value={r.candleCloseTime} label={t('candleClosed')} />
                 </div>
-              </button>
+                <TrackButton symbol={r.symbol} timeframe={timeframe} signalType={r.signalType} />
+              </div>
             ))}
           </div>
 
           <div className="hidden md:block card overflow-hidden">
             <div className="overflow-x-auto">
-              <table className="w-full text-sm min-w-[860px]">
+              <table className="w-full text-sm min-w-[960px]">
                 <thead className="bg-surface-100 text-slate-400">
                   <tr>
-                    {[t('asset'), t('signal'), t('score'), t('trend'), t('structure'), t('risk'), t('price'), t('stopLoss'), t('asTarget'), t('candleClosed'), ''].map((h, i) => (
+                    {[t('asset'), t('signal'), t('score'), t('trend'), t('structure'), t('risk'), t('price'), t('stopLoss'), t('asTarget'), t('candleClosed'), '', ''].map((h, i) => (
                       <th key={i} className="px-3 py-3 text-start font-medium whitespace-nowrap">{h}</th>
                     ))}
                   </tr>
@@ -241,6 +246,7 @@ export function ScannerPage() {
                       <td className="px-3 py-3 text-slate-300 tabular-nums whitespace-nowrap">{r.risk && r.signalType !== 'NO_TRADE' ? formatPrice(r.risk.stopLoss, lang) : '—'}</td>
                       <td className="px-3 py-3 text-slate-300 tabular-nums whitespace-nowrap">{r.risk && r.signalType !== 'NO_TRADE' ? formatPrice(r.risk.target1, lang) : '—'}</td>
                       <td className="px-3 py-3 text-xs text-slate-400 whitespace-nowrap">{r.candleCloseTime ? formatDate(r.candleCloseTime, lang) : '—'}</td>
+                      <td className="px-3 py-3"><TrackButton symbol={r.symbol} timeframe={timeframe} signalType={r.signalType} compact /></td>
                       <td className="px-3 py-3"><ChevronRight className="w-4 h-4 text-slate-500 flip-x" /></td>
                     </tr>
                   ))}
