@@ -64,3 +64,15 @@ export function formatDateShort(date: string | Date | number, lang: Lang): strin
     day: 'numeric',
   }).format(d);
 }
+
+/** "3 ساعت پیش" / "3 hours ago" — works for past and future timestamps. */
+export function timeAgo(date: string | Date | number, lang: Lang): string {
+  const ts = typeof date === 'string' ? new Date(date).getTime() : typeof date === 'number' ? date : date.getTime();
+  const diffSec = Math.round((ts - Date.now()) / 1000);
+  const rtf = new Intl.RelativeTimeFormat(lang === 'fa' ? 'fa' : 'en', { numeric: 'auto' });
+  const abs = Math.abs(diffSec);
+  if (abs < 60) return rtf.format(diffSec, 'second');
+  if (abs < 3600) return rtf.format(Math.round(diffSec / 60), 'minute');
+  if (abs < 86400) return rtf.format(Math.round(diffSec / 3600), 'hour');
+  return rtf.format(Math.round(diffSec / 86400), 'day');
+}
