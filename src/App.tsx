@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from '@/contexts/AuthContext';
 import { SettingsProvider } from '@/contexts/SettingsContext';
 import { Layout } from '@/components/Layout';
@@ -22,7 +22,6 @@ import { SignalLabPage } from '@/pages/SignalLabPage';
 
 function AppRoute({ children }: { children: ReactNode }) {
   const { loading } = useAuth();
-  const location = useLocation();
 
   if (loading) {
     return (
