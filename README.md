@@ -23,6 +23,13 @@ Because both sides use the same file, the manual scanner, the auto scan and the 
 * `RANGE` regime (EMAs not aligned or ADX < 20) can show `WAIT` but never `BUY/SELL`.
 * Your Settings (thresholds, risk %, min R/R) are applied to manual analysis and the backtest. The server scan uses the defaults so that Signal Lab statistics stay comparable.
 
+### Manual tracking (all users)
+* "Track" button on BUY/SELL signals (manual scanner + asset page) → Edge Function `track-signal`.
+* The browser sends only `{symbol, timeframe}`; the server recomputes the signal on the latest closed candle (default settings) and registers it with `source = manual_track`. Prices cannot be forged.
+* Limits per user: 20 open, 50 per 24h. Trackable timeframes: 15m, 30m, 1h, 4h, 1d.
+* Signal Lab statistics have a source filter (auto scan / manual tracking / all) and are never mixed by default.
+* Dashboard users without the CLI: `npm run bundle:functions` builds single-file versions in `supabase/single-file/` to paste into the dashboard editor.
+
 ### Signal Lab (paper trading)
 * Registered **once per signal** (first scan where the type flips to BUY/SELL) — unique index per signal candle.
 * Resolved **on the server** from closed candles after the signal candle: stop is checked before target in the same bar, gaps exit at the open, 0.25 % round-trip cost is deducted, expiry after N bars.
@@ -37,6 +44,7 @@ Because both sides use the same file, the manual scanner, the auto scan and the 
    supabase secrets set CRON_SECRET=<long random string>
    supabase functions deploy scheduled-scan --no-verify-jwt
    supabase functions deploy market-data --no-verify-jwt
+   supabase functions deploy track-signal --no-verify-jwt
    ```
 4. Schedule the scan: edit and run `supabase/cron_setup.sql` once (pg_cron + pg_net, minute :01 every hour).
 5. Test a run: `curl -X POST -H "x-cron-secret: <CRON_SECRET>" "https://<PROJECT_REF>.supabase.co/functions/v1/scheduled-scan?force=1"`.
