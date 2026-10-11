@@ -5,12 +5,14 @@ export function SignalBadge({ type }: { type: SignalType }) {
   const { t } = useSettings();
   const labelMap: Record<SignalType, string> = {
     BUY: t('buy'),
+    SELL: t('asShort'),
     WAIT: t('wait'),
     EXIT: t('exit'),
     NO_TRADE: t('noTrade'),
   };
   const classMap: Record<SignalType, string> = {
     BUY: 'signal-buy',
+    SELL: 'signal-sell',
     WAIT: 'signal-wait',
     EXIT: 'signal-exit',
     NO_TRADE: 'signal-no-trade',
@@ -63,7 +65,7 @@ export function RegimeBadge({ regime }: { regime: MarketRegime }) {
 }
 
 export function StructureBadge({ structure }: { structure: StructureLabel }) {
-  const { t, lang } = useSettings();
+  const { lang } = useSettings();
   const labels: Record<string, { fa: string; en: string }> = {
     HH_HL: { fa: 'سقف بالاتر/کف بالاتر', en: 'HH/HL' },
     LH_LL: { fa: 'سقف پایین‌تر/کف پایین‌تر', en: 'LH/LL' },
