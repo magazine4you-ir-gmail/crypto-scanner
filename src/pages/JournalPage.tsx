@@ -1,10 +1,10 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useSettings } from '@/contexts/SettingsContext';
 import {
-  getJournalEntries, addJournalEntry, updateJournalEntry, deleteJournalEntry,
+  getJournalEntries, addJournalEntry, deleteJournalEntry,
   type JournalEntry,
 } from '@/services/journalService';
-import { Card, SectionTitle, LoadingSpinner, ErrorState, EmptyState, Disclaimer } from '@/components/UI';
+import { Card, LoadingSpinner, ErrorState, EmptyState, Disclaimer } from '@/components/UI';
 import { formatDate } from '@/i18n/format';
 import { BookOpen, Plus, Trash2, X } from 'lucide-react';
 
@@ -108,7 +108,7 @@ export function JournalPage() {
             </div>
             <div>
               <label className="block text-xs text-slate-400 mb-1">{t('side')}</label>
-              <select value={form.side} onChange={(e) => setForm({ ...form, side: e.target.value as any })} className="input-field text-sm">
+              <select value={form.side} onChange={(e) => setForm({ ...form, side: e.target.value as 'BUY' | 'SELL' })} className="input-field text-sm">
                 <option value="BUY">{t('buy')}</option>
                 <option value="SELL">{t('bearish')}</option>
               </select>
@@ -131,7 +131,7 @@ export function JournalPage() {
             </div>
             <div>
               <label className="block text-xs text-slate-400 mb-1">{t('result')}</label>
-              <select value={form.result} onChange={(e) => setForm({ ...form, result: e.target.value as any })} className="input-field text-sm">
+              <select value={form.result} onChange={(e) => setForm({ ...form, result: e.target.value as typeof form.result })} className="input-field text-sm">
                 <option value="OPEN">{t('open')}</option>
                 <option value="WIN">{t('win')}</option>
                 <option value="LOSS">{t('loss')}</option>
@@ -159,17 +159,17 @@ export function JournalPage() {
       ) : (
         <div className="card overflow-hidden">
           <div className="overflow-x-auto">
-            <table className="w-full text-sm">
+            <table className="w-full text-sm min-w-[640px]">
               <thead className="bg-surface-100 dark:bg-surface-100 text-slate-400">
                 <tr>
                   <th className="px-4 py-3 text-start font-medium">{t('asset')}</th>
                   <th className="px-4 py-3 text-start font-medium">{t('side')}</th>
-                  <th className="px-4 py-3 text-start font-medium hidden sm:table-cell">{t('entry')}</th>
-                  <th className="px-4 py-3 text-start font-medium hidden sm:table-cell">{t('exit')}</th>
-                  <th className="px-4 py-3 text-start font-medium hidden md:table-cell">{t('size')}</th>
+                  <th className="px-4 py-3 text-start font-medium">{t('entry')}</th>
+                  <th className="px-4 py-3 text-start font-medium">{t('exit')}</th>
+                  <th className="px-4 py-3 text-start font-medium">{t('size')}</th>
                   <th className="px-4 py-3 text-start font-medium">{t('result')}</th>
-                  <th className="px-4 py-3 text-start font-medium hidden lg:table-cell">{t('strategy')}</th>
-                  <th className="px-4 py-3 text-start font-medium hidden sm:table-cell">{t('date')}</th>
+                  <th className="px-4 py-3 text-start font-medium">{t('strategy')}</th>
+                  <th className="px-4 py-3 text-start font-medium">{t('date')}</th>
                   <th className="px-4 py-3"></th>
                 </tr>
               </thead>
@@ -178,14 +178,14 @@ export function JournalPage() {
                   <tr key={e.id} className="hover:bg-surface-100 dark:hover:bg-surface-100">
                     <td className="px-4 py-3 font-semibold text-slate-100 uppercase">{e.asset}</td>
                     <td className="px-4 py-3 text-slate-300">{e.side === 'BUY' ? t('buy') : t('bearish')}</td>
-                    <td className="px-4 py-3 text-slate-300 hidden sm:table-cell tabular-nums">{e.entry_price}</td>
-                    <td className="px-4 py-3 text-slate-300 hidden sm:table-cell tabular-nums">{e.exit_price ?? '—'}</td>
-                    <td className="px-4 py-3 text-slate-300 hidden md:table-cell tabular-nums">{e.size}</td>
+                    <td className="px-4 py-3 text-slate-300 tabular-nums">{e.entry_price}</td>
+                    <td className="px-4 py-3 text-slate-300 tabular-nums">{e.exit_price ?? '—'}</td>
+                    <td className="px-4 py-3 text-slate-300 tabular-nums">{e.size}</td>
                     <td className={`px-4 py-3 font-medium ${resultColor(e.result)}`}>
                       {e.result === 'OPEN' ? t('open') : e.result === 'WIN' ? t('win') : e.result === 'LOSS' ? t('loss') : t('breakeven')}
                     </td>
-                    <td className="px-4 py-3 text-slate-400 hidden lg:table-cell">{e.strategy ?? '—'}</td>
-                    <td className="px-4 py-3 text-slate-400 hidden sm:table-cell">{formatDate(e.trade_date, lang)}</td>
+                    <td className="px-4 py-3 text-slate-400">{e.strategy ?? '—'}</td>
+                    <td className="px-4 py-3 text-slate-400">{formatDate(e.trade_date, lang)}</td>
                     <td className="px-4 py-3">
                       <button onClick={() => handleDelete(e.id)} className="p-1 text-slate-500 hover:text-error-400 rounded">
                         <Trash2 className="w-4 h-4" />
