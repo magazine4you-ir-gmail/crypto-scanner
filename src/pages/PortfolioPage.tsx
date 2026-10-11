@@ -1,12 +1,12 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useSettings } from '@/contexts/SettingsContext';
 import {
-  getHoldings, addHolding, updateHolding, deleteHolding,
+  getHoldings, addHolding, deleteHolding,
   type PortfolioHolding,
 } from '@/services/portfolioService';
 import { fetchCoinGeckoMarkets } from '@/services/marketData';
-import { Card, SectionTitle, LoadingSpinner, ErrorState, EmptyState, Disclaimer } from '@/components/UI';
-import { formatPrice, formatCompact, formatPercent } from '@/i18n/format';
+import { Card, LoadingSpinner, ErrorState, EmptyState, Disclaimer } from '@/components/UI';
+import { formatPrice, formatPercent } from '@/i18n/format';
 import { Briefcase, Plus, Trash2, X } from 'lucide-react';
 
 interface HoldingWithPrice extends PortfolioHolding {
@@ -142,14 +142,14 @@ export function PortfolioPage() {
       ) : (
         <div className="card overflow-hidden">
           <div className="overflow-x-auto">
-            <table className="w-full text-sm">
+            <table className="w-full text-sm min-w-[640px]">
               <thead className="bg-surface-100 dark:bg-surface-100 text-slate-400">
                 <tr>
                   <th className="px-4 py-3 text-start font-medium">{t('asset')}</th>
                   <th className="px-4 py-3 text-start font-medium">{t('quantity')}</th>
-                  <th className="px-4 py-3 text-start font-medium hidden sm:table-cell">{t('avgEntry')}</th>
+                  <th className="px-4 py-3 text-start font-medium">{t('avgEntry')}</th>
                   <th className="px-4 py-3 text-start font-medium">{t('price')}</th>
-                  <th className="px-4 py-3 text-start font-medium hidden sm:table-cell">{t('totalValue')}</th>
+                  <th className="px-4 py-3 text-start font-medium">{t('totalValue')}</th>
                   <th className="px-4 py-3 text-start font-medium">{t('unrealizedPnl')}</th>
                   <th className="px-4 py-3"></th>
                 </tr>
@@ -159,9 +159,9 @@ export function PortfolioPage() {
                   <tr key={h.id} className="hover:bg-surface-100 dark:hover:bg-surface-100">
                     <td className="px-4 py-3 font-semibold text-slate-100 uppercase">{h.symbol}</td>
                     <td className="px-4 py-3 text-slate-300 tabular-nums">{h.quantity}</td>
-                    <td className="px-4 py-3 text-slate-300 hidden sm:table-cell tabular-nums">{formatPrice(h.avg_entry_price, lang)}</td>
+                    <td className="px-4 py-3 text-slate-300 tabular-nums">{formatPrice(h.avg_entry_price, lang)}</td>
                     <td className="px-4 py-3 text-slate-300 tabular-nums">{formatPrice(h.currentPrice, lang)}</td>
-                    <td className="px-4 py-3 text-slate-300 hidden sm:table-cell tabular-nums">{formatPrice(h.marketValue, lang)}</td>
+                    <td className="px-4 py-3 text-slate-300 tabular-nums">{formatPrice(h.marketValue, lang)}</td>
                     <td className="px-4 py-3">
                       <span className={`tabular-nums font-medium ${h.pnlPct !== null && h.pnlPct >= 0 ? 'text-success-400' : 'text-error-400'}`}>
                         {formatPercent(h.pnlPct, lang)}
