@@ -288,6 +288,23 @@ export const translations: Translations = {
   slByScore: { fa: 'بر اساس امتیاز', en: 'By Score' },
   avgPnl: { fa: 'میانگین PnL', en: 'Avg PnL' },
 
+  trackSignal: { fa: 'ردیابی', en: 'Track' },
+  trackTracked: { fa: 'ردیابی شد', en: 'Tracked' },
+  trackDone: { fa: 'در آزمایشگاه سیگنال ثبت شد.', en: 'Added to Signal Lab.' },
+  trackAlready: { fa: 'این سیگنال قبلاً ردیابی شده است.', en: 'This signal is already being tracked.' },
+  trackNotActionable: { fa: 'این ارز در کندل بسته‌شده فعلی سیگنال خرید/شورت ندارد.', en: 'No BUY/SHORT signal on the latest closed candle.' },
+  trackLimitOpen: { fa: 'سقف سیگنال‌های بازِ ردیابی‌شده پر است', en: 'Open tracked-signal limit reached' },
+  trackLimitDay: { fa: 'سقف ردیابی روزانه پر است', en: 'Daily tracking limit reached' },
+  trackDataNotReady: { fa: 'داده کندل جدید هنوز آماده نیست؛ چند ثانیه بعد دوباره تلاش کنید.', en: 'Latest candle not ready yet; try again in a few seconds.' },
+  trackFailed: { fa: 'ردیابی انجام نشد. دوباره تلاش کنید.', en: 'Tracking failed. Please try again.' },
+  trackNote: {
+    fa: 'ردیابی: سرور سیگنال را روی آخرین کندل بسته‌شده دوباره محاسبه و ثبت می‌کند (با تنظیمات پیش‌فرض، نه تنظیمات شخصی شما).',
+    en: 'Tracking: the server recomputes the signal on the latest closed candle (default settings, not your personal ones).',
+  },
+  slSourceAuto: { fa: 'اسکن خودکار', en: 'Auto scan' },
+  slSourceManual: { fa: 'ردیابی دستی', en: 'Manual tracking' },
+  slSourceAll: { fa: 'همه منابع', en: 'All sources' },
+  slManualBadge: { fa: 'دستی', en: 'Manual' },
   totalPnl: { fa: 'مجموع PnL', en: 'Total PnL' },
 
   // Sorting / times / mobile
