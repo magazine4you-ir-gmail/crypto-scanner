@@ -28,6 +28,7 @@ export interface ScanResultRow {
   target2: number | null;
   target3: number | null;
   risk_reward: number | null;
+  shortable: boolean | null;
   candle_close_time: string | null;
   signal_since: string;
   scanned_at: string;
@@ -40,12 +41,15 @@ export interface ScanRunRow {
   status: 'running' | 'ok' | 'partial' | 'failed';
   universe_source: string | null;
   timeframes: string[];
+  timeframes_scanned: string[] | null;
   symbols_total: number;
   scanned: number;
   failed: number;
   buy_count: number;
   sell_count: number;
   wait_count: number;
+  outcomes_opened: number | null;
+  outcomes_closed: number | null;
   error: string | null;
 }
 
@@ -53,8 +57,20 @@ export async function fetchScanResults(): Promise<ScanResultRow[]> {
   const { data, error } = await supabase
     .from('scan_results')
     .select('*')
-    .order('score', { ascending: false })
+    .order('signal_since', { ascending: false })
     .limit(1000);
+  if (error) throw new Error(error.message);
+  return (data ?? []) as ScanResultRow[];
+}
+
+/** Newest BUY/SELL signals (used by the dashboard). */
+export async function fetchRecentActionable(limit = 10): Promise<ScanResultRow[]> {
+  const { data, error } = await supabase
+    .from('scan_results')
+    .select('*')
+    .in('signal_type', ['BUY', 'SELL'])
+    .order('signal_since', { ascending: false })
+    .limit(limit);
   if (error) throw new Error(error.message);
   return (data ?? []) as ScanResultRow[];
 }
