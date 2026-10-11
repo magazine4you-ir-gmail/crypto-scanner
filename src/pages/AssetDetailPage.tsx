@@ -17,6 +17,7 @@ import type { SignalResult } from '@/types/signal';
 import type { SignalRecord } from '@/services/signalService';
 import { PriceChart } from '@/components/PriceChart';
 import { Card, SectionTitle, LoadingSpinner, ErrorState, Disclaimer } from '@/components/UI';
+import { TrackButton } from '@/components/TrackButton';
 import { SignalBadge, TrendBadge, RiskBadge, RegimeBadge, StructureBadge, ScoreBar } from '@/components/Badges';
 import { formatPrice, formatPercent, formatDate } from '@/i18n/format';
 import { TIMEFRAMES } from '@/types/market';
@@ -293,6 +294,11 @@ export function AssetDetailPage() {
             </button>
           </div>
           <p className="text-xs text-slate-400 mb-4">{t('liveAnalysisHint')}</p>
+          {(signal.signalType === 'BUY' || signal.signalType === 'SELL') && (
+            <div className="mb-4">
+              <TrackButton symbol={signal.symbol} timeframe={timeframe} signalType={signal.signalType} />
+            </div>
+          )}
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4 mb-4">
             <InfoBox label={t('signal')}>
               <SignalBadge type={signal.signalType} />
