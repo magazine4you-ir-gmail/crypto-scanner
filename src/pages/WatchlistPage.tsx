@@ -6,11 +6,11 @@ import {
   type Watchlist, type WatchlistItem,
 } from '@/services/watchlistService';
 import { fetchCoinGeckoMarkets } from '@/services/marketData';
-import { Card, SectionTitle, LoadingSpinner, ErrorState, EmptyState, Disclaimer } from '@/components/UI';
+import { Card, LoadingSpinner, ErrorState, EmptyState, Disclaimer } from '@/components/UI';
 import { Star, Plus, Pencil, Trash2, X, Check } from 'lucide-react';
 
 export function WatchlistPage() {
-  const { t, lang } = useSettings();
+  const { t } = useSettings();
   const [watchlists, setWatchlists] = useState<Watchlist[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [items, setItems] = useState<WatchlistItem[]>([]);
