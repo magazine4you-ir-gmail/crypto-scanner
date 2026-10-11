@@ -9,6 +9,7 @@ import {
   type ISeriesApi,
 } from 'lightweight-charts';
 import type { Candle } from '@/types/market';
+import type { UTCTimestamp, LineStyle } from 'lightweight-charts';
 import { ema } from '@/engine/indicators/movingAverage';
 import { vwap } from '@/engine/indicators/vwap';
 import { bollingerBands } from '@/engine/indicators/bollinger';
@@ -115,7 +116,7 @@ export function PriceChart({
     const candleSeries = candleSeriesRef.current;
 
     const candleData = candles.map((c) => ({
-      time: (c.openTime / 1000) as any,
+      time: (c.openTime / 1000) as UTCTimestamp,
       open: c.open,
       high: c.high,
       low: c.low,
@@ -126,7 +127,7 @@ export function PriceChart({
 
     if (volumeSeriesRef.current && showVolume) {
       const volumeData = candles.map((c) => ({
-        time: (c.openTime / 1000) as any,
+        time: (c.openTime / 1000) as UTCTimestamp,
         value: c.volume,
         color: c.close >= c.open ? 'rgba(16, 185, 129, 0.3)' : 'rgba(239, 68, 68, 0.3)',
       }));
@@ -137,12 +138,12 @@ export function PriceChart({
 
     const addLine = (values: (number | null)[], color: string, lineStyle?: number) => {
       const data = values
-        .map((v, i) => (v !== null ? { time: (candles[i].openTime / 1000) as any, value: v } : null))
-        .filter(Boolean) as any;
+        .map((v, i) => (v !== null ? { time: (candles[i].openTime / 1000) as UTCTimestamp, value: v } : null))
+        .filter((x): x is { time: UTCTimestamp; value: number } => x !== null);
       const series = chart.addSeries(LineSeries, {
         color,
         lineWidth: 1,
-        lineStyle: lineStyle as any,
+        lineStyle: lineStyle as LineStyle | undefined,
         priceLineVisible: false,
         lastValueVisible: false,
       });
