@@ -8,6 +8,18 @@ export default defineConfig({
   resolve: {
     alias: {
       '@': fileURLToPath(new URL('./src', import.meta.url)),
+      '@engine': fileURLToPath(new URL('./supabase/functions/_shared/engine.ts', import.meta.url)),
+    },
+  },
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          vendor: ['react', 'react-dom', 'react-router-dom'],
+          charts: ['lightweight-charts'],
+          supabase: ['@supabase/supabase-js'],
+        },
+      },
     },
   },
   optimizeDeps: {
