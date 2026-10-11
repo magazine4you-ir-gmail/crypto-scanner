@@ -316,7 +316,11 @@ async function evaluateOpenOutcomes(supabase: SupabaseClient, t0: number): Promi
 async function registerNewOutcomes(supabase: SupabaseClient, fresh: ScanRow[], nowIso: string): Promise<number> {
   if (fresh.length === 0) return 0;
 
-  const { data: openRows } = await supabase.from("signal_outcomes").select("symbol, timeframe, signal_type").eq("status", "OPEN");
+  const { data: openRows } = await supabase
+    .from("signal_outcomes")
+    .select("symbol, timeframe, signal_type")
+    .eq("status", "OPEN")
+    .eq("source", "auto_scan");
   const openSet = new Set((openRows ?? []).map((o) => `${o.symbol}|${o.timeframe}|${o.signal_type}`));
 
   const toInsert: Record<string, unknown>[] = [];
@@ -332,6 +336,7 @@ async function registerNewOutcomes(supabase: SupabaseClient, fresh: ScanRow[], n
         .eq("symbol", r.symbol)
         .eq("timeframe", r.timeframe)
         .eq("signal_type", opposite)
+        .eq("source", "auto_scan")
         .eq("status", "OPEN");
       openSet.delete(`${r.symbol}|${r.timeframe}|${opposite}`);
     }
