@@ -1,41 +1,32 @@
-export type SignalType = 'BUY' | 'WAIT' | 'EXIT' | 'NO_TRADE';
+// Core types are defined once in the shared engine and re-exported here.
+import type {
+  SignalType,
+  TrendDirection,
+  MarketRegime,
+  StructureLabel,
+  RiskLevel,
+  SwingPoint,
+  SRLevel,
+  RiskPlan,
+  ScoringWeights,
+  SignalThresholds,
+  Direction,
+} from '@engine';
 
-export type TrendDirection = 'BULLISH' | 'BEARISH' | 'NEUTRAL';
+export type {
+  SignalType,
+  TrendDirection,
+  MarketRegime,
+  StructureLabel,
+  RiskLevel,
+  SwingPoint,
+  RiskPlan,
+  ScoringWeights,
+  SignalThresholds,
+  Direction,
+};
 
-export type MarketRegime =
-  | 'BULLISH_TREND'
-  | 'BEARISH_TREND'
-  | 'RANGE'
-  | 'HIGH_VOLATILITY'
-  | 'LOW_VOLATILITY'
-  | 'TRANSITION'
-  | 'UNCLEAR';
-
-export type StructureLabel =
-  | 'HH_HL'
-  | 'LH_LL'
-  | 'RANGING'
-  | 'BOS_BULLISH'
-  | 'BOS_BEARISH'
-  | 'CHOCH_BULLISH'
-  | 'CHOCH_BEARISH'
-  | 'UNDEFINED';
-
-export type RiskLevel = 'LOW' | 'MEDIUM' | 'HIGH';
-
-export interface SwingPoint {
-  index: number;
-  time: number;
-  price: number;
-  type: 'HIGH' | 'LOW';
-}
-
-export interface SupportResistanceLevel {
-  price: number;
-  type: 'SUPPORT' | 'RESISTANCE';
-  strength: number;
-  touches: number;
-}
+export type SupportResistanceLevel = SRLevel;
 
 export interface ScoreBreakdown {
   trend: number;
@@ -56,23 +47,12 @@ export interface ConfluenceFactor {
   weight: number;
 }
 
-export interface RiskPlan {
-  entryLow: number;
-  entryHigh: number;
-  invalidation: number;
-  stopLoss: number;
-  target1: number;
-  target2: number;
-  target3: number;
-  riskReward: number;
-  riskLevel: RiskLevel;
-  positionSize: number | null;
-}
-
 export interface SignalResult {
   symbol: string;
   timeframe: string;
   signalType: SignalType;
+  /** Direction the score/plan refer to (LONG for BUY, SHORT for SELL; dominant side for WAIT). */
+  bias: Direction;
   score: number;
   regime: MarketRegime;
   trend: TrendDirection;
@@ -85,21 +65,7 @@ export interface SignalResult {
   explanationFa: string;
   explanationEn: string;
   generatedAt: number;
+  /** Close time (ms) of the last candle the analysis is based on. */
+  candleCloseTime: number | null;
   dataQualityOk: boolean;
-}
-
-export interface ScoringWeights {
-  trend: number;
-  structure: number;
-  momentum: number;
-  volume: number;
-  volatility: number;
-  supportResistance: number;
-  riskReward: number;
-}
-
-export interface SignalThresholds {
-  strong: number;
-  buy: number;
-  watch: number;
 }
