@@ -1,20 +1,17 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { TestTubes, RefreshCw, Play } from 'lucide-react';
+import { TestTubes, RefreshCw } from 'lucide-react';
 import { useSettings } from '@/contexts/SettingsContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { Card, SectionTitle, LoadingSpinner, ErrorState, EmptyState, Disclaimer } from '@/components/UI';
 import { ScoreBar } from '@/components/Badges';
+import { Metric, TimeStamp, Chip, Pill, PillRow } from '@/components/Responsive';
 import { formatPrice, formatNumber, formatPercent, formatDate } from '@/i18n/format';
-import {
-  fetchOutcomes,
-  evaluateOpenOutcomes,
-  computeStats,
-  type SignalOutcome,
-  type OutcomeStatus,
-} from '@/services/outcomeService';
+import { fetchOutcomes, computeStats, type SignalOutcome, type OutcomeStatus } from '@/services/outcomeService';
+import { fetchLatestScanRun, type ScanRunRow } from '@/services/scanService';
 
 type Tab = 'ALL' | 'OPEN' | 'WIN' | 'LOSS' | 'EXPIRED';
+type Dir = 'ALL' | 'BUY' | 'SELL';
 
 export function SignalLabPage() {
   const { t, lang } = useSettings();
@@ -22,19 +19,20 @@ export function SignalLabPage() {
   const navigate = useNavigate();
 
   const [rows, setRows] = useState<SignalOutcome[]>([]);
+  const [run, setRun] = useState<ScanRunRow | null>(null);
   const [loading, setLoading] = useState(true);
-  const [evaluating, setEvaluating] = useState(false);
-  const [evalProgress, setEvalProgress] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [tab, setTab] = useState<Tab>('ALL');
   const [tf, setTf] = useState('ALL');
+  const [dir, setDir] = useState<Dir>('ALL');
 
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const data = await fetchOutcomes(400);
+      const [data, latest] = await Promise.all([fetchOutcomes(400), fetchLatestScanRun().catch(() => null)]);
       setRows(data);
+      setRun(latest);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -51,36 +49,19 @@ export function SignalLabPage() {
     void load();
   }, [authLoading, user, load]);
 
-  const runEvaluate = async () => {
-    setEvaluating(true);
-    setEvalProgress('');
-    try {
-      const n = await evaluateOpenOutcomes((done, total) => {
-        setEvalProgress(`${done}/${total}`);
-      });
-      setEvalProgress(lang === 'fa' ? `${n} به‌روزرسانی شد` : `${n} updated`);
-      await load();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setEvaluating(false);
-    }
-  };
-
   const stats = useMemo(() => computeStats(rows), [rows]);
+  const timeframes = useMemo(() => Array.from(new Set(rows.map((r) => r.timeframe))).sort(), [rows]);
 
-  const timeframes = useMemo(
-    () => Array.from(new Set(rows.map((r) => r.timeframe))).sort(),
-    [rows],
+  const filtered = useMemo(
+    () =>
+      rows.filter((r) => {
+        if (tab !== 'ALL' && r.status !== tab) return false;
+        if (tf !== 'ALL' && r.timeframe !== tf) return false;
+        if (dir !== 'ALL' && r.signal_type !== dir) return false;
+        return true;
+      }),
+    [rows, tab, tf, dir],
   );
-
-  const filtered = useMemo(() => {
-    return rows.filter((r) => {
-      if (tab !== 'ALL' && r.status !== tab) return false;
-      if (tf !== 'ALL' && r.timeframe !== tf) return false;
-      return true;
-    });
-  }, [rows, tab, tf]);
 
   if (!authLoading && !user) {
     return (
@@ -88,9 +69,7 @@ export function SignalLabPage() {
         <Header />
         <Card>
           <p className="text-slate-300 text-sm mb-4">{t('asLoginRequired')}</p>
-          <button className="btn-primary text-sm" onClick={() => navigate('/login')}>
-            {t('signIn')}
-          </button>
+          <button className="btn-primary text-sm" onClick={() => navigate('/login')}>{t('signIn')}</button>
         </Card>
       </div>
     );
@@ -103,43 +82,48 @@ export function SignalLabPage() {
     { key: 'LOSS', label: t('loss') },
     { key: 'EXPIRED', label: t('slExpired') },
   ];
+  const open = (r: SignalOutcome) => navigate(`/asset/${r.symbol}?tf=${encodeURIComponent(r.timeframe)}&outcome=${encodeURIComponent(r.id)}`);
+  const lastEval = run?.finished_at ?? run?.started_at ?? null;
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between gap-3 flex-wrap">
+    <div className="space-y-4 sm:space-y-6">
+      <div className="flex items-center justify-between gap-3">
         <Header />
-        <div className="flex items-center gap-2">
-          <button
-            onClick={() => void runEvaluate()}
-            disabled={evaluating || loading}
-            className="btn-primary text-sm inline-flex items-center gap-2"
-          >
-            <Play className="w-4 h-4" />
-            {evaluating ? `${t('slEvaluating')} ${evalProgress}` : t('slEvaluate')}
-          </button>
-          <button onClick={() => void load()} className="btn-secondary text-sm inline-flex items-center gap-2">
-            <RefreshCw className="w-4 h-4" />
-            {t('asRefresh')}
-          </button>
-        </div>
+        <button onClick={() => void load()} className="btn-secondary text-sm inline-flex items-center gap-2 shrink-0" aria-label={t('asRefresh')}>
+          <RefreshCw className="w-4 h-4" />
+          <span className="hidden sm:inline">{t('asRefresh')}</span>
+        </button>
       </div>
 
-      <p className="text-sm text-slate-400">{t('slDescription')}</p>
+      <p className="text-sm text-slate-400 leading-6">{t('slDescription')}</p>
+      {lastEval && (
+        <p className="text-[11px] text-slate-500">
+          {t('lastScanOutcomes')}: {formatDate(lastEval, lang)}
+          {run && run.outcomes_closed != null ? ` · +${formatNumber(run.outcomes_opened ?? 0, lang, 0)} / ✓${formatNumber(run.outcomes_closed, lang, 0)}` : ''}
+        </p>
+      )}
 
       {loading && <LoadingSpinner size="lg" />}
       {error && <ErrorState message={error} onRetry={() => void load()} />}
 
       {!loading && !error && (
         <>
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
-            <Stat label={t('slOpen')} value={String(stats.open)} />
-            <Stat label={t('totalSignals')} value={String(stats.totalClosed)} />
+          <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-4 gap-2 sm:gap-3">
+            <Stat label={t('slOpen')} value={formatNumber(stats.open, lang, 0)} />
+            <Stat label={t('totalSignals')} value={formatNumber(stats.totalClosed, lang, 0)} />
             <Stat
               label={t('winRate')}
               value={formatPercent(stats.winRate, lang)}
-              color={stats.winRate >= 50 ? 'text-success-400' : 'text-error-400'}
+              hint={`${t('breakEven')}: ${formatPercent(stats.breakEvenWinRate, lang)}`}
+              color={stats.winRate >= stats.breakEvenWinRate ? 'text-success-400' : 'text-error-400'}
             />
-            <Stat label={`${t('win')} / ${t('loss')}`} value={`${stats.wins} / ${stats.losses}`} />
+            <Stat label={`${t('win')} / ${t('loss')} / ${t('slExpired')}`} value={`${stats.wins} / ${stats.losses} / ${stats.expired}`} />
+            <Stat
+              label={t('expectancyR')}
+              value={`${stats.expectancyR >= 0 ? '+' : ''}${formatNumber(stats.expectancyR, lang, 2)}R`}
+              hint={t('netOfCosts')}
+              color={stats.expectancyR >= 0 ? 'text-success-400' : 'text-error-400'}
+            />
             <Stat
               label={t('avgPnl')}
               value={formatPercent(stats.avgPnl, lang)}
@@ -147,68 +131,39 @@ export function SignalLabPage() {
             />
             <Stat
               label={t('profitFactor')}
-              value={stats.profitFactor === Infinity ? '∞' : stats.profitFactor.toFixed(2)}
+              value={stats.profitFactor === Infinity ? '∞' : formatNumber(stats.profitFactor, lang, 2)}
               color={stats.profitFactor >= 1 ? 'text-success-400' : 'text-error-400'}
             />
+            <Stat label={t('totalPnl')} value={formatPercent(stats.totalPnl, lang)} color={stats.totalPnl >= 0 ? 'text-success-400' : 'text-error-400'} />
           </div>
 
-          {(Object.keys(stats.byTimeframe).length > 0 || Object.keys(stats.byScoreBucket).length > 0) && (
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-              <Card>
-                <SectionTitle>{t('slByTimeframe')}</SectionTitle>
-                <div className="space-y-2">
-                  {Object.entries(stats.byTimeframe).map(([k, v]) => (
-                    <div key={k} className="flex justify-between text-sm">
-                      <span className="text-slate-300 uppercase">{k}</span>
-                      <span className="text-slate-400">
-                        {v.wins}W / {v.losses}L · {formatPercent(v.winRate, lang)}
-                      </span>
-                    </div>
-                  ))}
-                  {Object.keys(stats.byTimeframe).length === 0 && (
-                    <p className="text-sm text-slate-500">{t('noResults')}</p>
-                  )}
-                </div>
-              </Card>
-              <Card>
-                <SectionTitle>{t('slByScore')}</SectionTitle>
-                <div className="space-y-2">
-                  {['80+', '70-79', '60-69', '<60'].filter((b) => stats.byScoreBucket[b]).map((k) => {
-                    const v = stats.byScoreBucket[k];
-                    return (
-                      <div key={k} className="flex justify-between text-sm">
-                        <span className="text-slate-300">{k}</span>
-                        <span className="text-slate-400">
-                          {v.wins}W / {v.losses}L · {formatPercent(v.winRate, lang)}
-                        </span>
-                      </div>
-                    );
-                  })}
-                  {Object.keys(stats.byScoreBucket).length === 0 && (
-                    <p className="text-sm text-slate-500">{t('noResults')}</p>
-                  )}
-                </div>
-              </Card>
+          {stats.totalClosed > 0 && stats.totalClosed < 30 && (
+            <p className="text-xs text-warning-400">
+              {lang === 'fa' ? 'نمونه هنوز کوچک است (کمتر از ۳۰ معامله بسته‌شده)؛ به این آمار تکیه نکنید.' : 'Sample is still small (< 30 closed trades); do not rely on these numbers yet.'}
+            </p>
+          )}
+
+          {stats.totalClosed > 0 && (
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-3 sm:gap-4">
+              <BucketCard title={t('slByTimeframe')} data={stats.byTimeframe} order={timeframes} upper />
+              <BucketCard title={t('slByScore')} data={stats.byScoreBucket} order={['80+', '70-79', '60-69', '<60']} />
+              <BucketCard title={t('byDirection')} data={stats.byDirection} order={['BUY', 'SELL']} labels={{ BUY: t('buy'), SELL: t('asShort') }} />
             </div>
           )}
 
-          <Card className="!p-4">
-            <div className="flex flex-wrap items-center gap-2">
+          <Card className="!p-3 sm:!p-4 space-y-3">
+            <PillRow>
               {tabs.map((x) => (
-                <button
-                  key={x.key}
-                  onClick={() => setTab(x.key)}
-                  className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
-                    tab === x.key
-                      ? 'bg-primary-600/20 text-primary-400 border border-primary-500/30'
-                      : 'text-slate-400 hover:text-slate-200 hover:bg-surface-100'
-                  }`}
-                >
-                  {x.label}
-                </button>
+                <Pill key={x.key} active={tab === x.key} onClick={() => setTab(x.key)}>{x.label}</Pill>
               ))}
-              <div className="flex-1" />
-              <select value={tf} onChange={(e) => setTf(e.target.value)} className="input-field text-sm !w-auto">
+            </PillRow>
+            <div className="grid grid-cols-2 gap-2 sm:flex sm:justify-end">
+              <select value={dir} onChange={(e) => setDir(e.target.value as Dir)} className="input-field text-sm sm:!w-auto">
+                <option value="ALL">{t('signal')}: {t('all')}</option>
+                <option value="BUY">{t('buy')}</option>
+                <option value="SELL">{t('asShort')}</option>
+              </select>
+              <select value={tf} onChange={(e) => setTf(e.target.value)} className="input-field text-sm sm:!w-auto">
                 <option value="ALL">{t('timeframe')}: {t('all')}</option>
                 {timeframes.map((x) => (
                   <option key={x} value={x}>{x.toUpperCase()}</option>
@@ -222,68 +177,78 @@ export function SignalLabPage() {
           ) : filtered.length === 0 ? (
             <EmptyState message={t('noResults')} />
           ) : (
-            <div className="card overflow-hidden">
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead className="bg-surface-100 text-slate-400">
-                    <tr>
-                      <th className="px-3 py-3 text-start font-medium">{t('asset')}</th>
-                      <th className="px-3 py-3 text-start font-medium">{t('timeframe')}</th>
-                      <th className="px-3 py-3 text-start font-medium">{t('signal')}</th>
-                      <th className="px-3 py-3 text-start font-medium">{t('score')}</th>
-                      <th className="px-3 py-3 text-start font-medium">{t('price')}</th>
-                      <th className="px-3 py-3 text-start font-medium hidden md:table-cell">{t('stopLoss')}</th>
-                      <th className="px-3 py-3 text-start font-medium hidden md:table-cell">{t('asTarget')}</th>
-                      <th className="px-3 py-3 text-start font-medium">{t('result')}</th>
-                      <th className="px-3 py-3 text-start font-medium">PnL</th>
-                      <th className="px-3 py-3 text-start font-medium hidden lg:table-cell">{t('date')}</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-surface-200">
-                    {filtered.map((r) => (
-                      <tr
-                        key={r.id}
-                        className="hover:bg-surface-100 cursor-pointer"
-                        onClick={() =>
-                          navigate(`/asset/${r.symbol}?tf=${encodeURIComponent(r.timeframe)}&outcome=${encodeURIComponent(r.id)}`)
-                        }
-                      >
-                        <td className="px-3 py-3 font-semibold text-slate-100">{r.base_asset}</td>
-                        <td className="px-3 py-3 text-slate-300 uppercase">{r.timeframe}</td>
-                        <td className="px-3 py-3">
-                          <span className={r.signal_type === 'BUY' ? 'signal-buy' : 'signal-sell'}>
-                            {r.signal_type === 'BUY' ? t('buy') : t('asShort')}
-                          </span>
-                        </td>
-                        <td className="px-3 py-3"><ScoreBar score={r.score} /></td>
-                        <td className="px-3 py-3 text-slate-300 tabular-nums">{formatPrice(Number(r.price_at_signal), lang)}</td>
-                        <td className="px-3 py-3 text-slate-300 tabular-nums hidden md:table-cell">
-                          {formatPrice(Number(r.stop_loss), lang)}
-                        </td>
-                        <td className="px-3 py-3 text-slate-300 tabular-nums hidden md:table-cell">
-                          {formatPrice(Number(r.target1), lang)}
-                        </td>
-                        <td className="px-3 py-3">
+            <>
+              {/* phones: cards, newest first */}
+              <div className="md:hidden space-y-2.5">
+                {filtered.map((r) => (
+                  <button key={r.id} onClick={() => open(r)} className="card w-full text-start p-3 space-y-3 active:bg-surface-100">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="text-base font-bold text-slate-100">{r.base_asset}</span>
+                          <Chip>{r.timeframe}</Chip>
+                        </div>
+                        <div className="flex items-center gap-2 mt-1.5">
+                          <span className={r.signal_type === 'BUY' ? 'signal-buy' : 'signal-sell'}>{r.signal_type === 'BUY' ? t('buy') : t('asShort')}</span>
                           <StatusBadge status={r.status} t={t} />
-                        </td>
-                        <td className="px-3 py-3 tabular-nums">
-                          {r.pnl_pct != null ? (
-                            <span className={Number(r.pnl_pct) >= 0 ? 'text-success-400' : 'text-error-400'}>
-                              {formatPercent(Number(r.pnl_pct), lang)}
-                            </span>
-                          ) : (
-                            '—'
-                          )}
-                        </td>
-                        <td className="px-3 py-3 text-slate-500 hidden lg:table-cell">
-                          {formatDate(r.signal_at, lang)}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+                        </div>
+                      </div>
+                      <div className="text-end shrink-0">
+                        <ScoreBar score={r.score} />
+                        <PnlText r={r} lang={lang} />
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-3 gap-x-3 gap-y-2 rounded-lg bg-surface-100/60 p-2.5">
+                      <Metric label={t('price')} value={formatPrice(Number(r.price_at_signal), lang)} />
+                      <Metric label={t('stopLoss')} value={formatPrice(Number(r.stop_loss), lang)} tone="text-error-400" />
+                      <Metric label={t('asTarget')} value={formatPrice(Number(r.target1), lang)} tone="text-success-400" />
+                      <Metric label="R" value={r.r_multiple != null ? `${Number(r.r_multiple) >= 0 ? '+' : ''}${formatNumber(Number(r.r_multiple), lang, 2)}` : '—'} />
+                      <Metric label={t('exitTime')} value={r.exit_at ? formatDate(r.exit_at, lang) : '—'} />
+                      <Metric label={t('barsHeld')} value={r.bars_held ?? '—'} />
+                    </div>
+                    <div className="border-t border-surface-200 pt-2">
+                      <TimeStamp value={r.candle_close_time ?? r.signal_at} label={t('signalTime')} />
+                    </div>
+                  </button>
+                ))}
               </div>
-            </div>
+
+              <div className="hidden md:block card overflow-hidden">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm min-w-[980px]">
+                    <thead className="bg-surface-100 text-slate-400">
+                      <tr>
+                        {[t('asset'), t('timeframe'), t('signal'), t('score'), t('price'), t('stopLoss'), t('asTarget'), t('result'), 'PnL', 'R', t('signalTime'), t('exitTime')].map((h) => (
+                          <th key={h} className="px-3 py-3 text-start font-medium whitespace-nowrap">{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-surface-200">
+                      {filtered.map((r) => (
+                        <tr key={r.id} className="hover:bg-surface-100 cursor-pointer" onClick={() => open(r)}>
+                          <td className="px-3 py-3 font-semibold text-slate-100">{r.base_asset}</td>
+                          <td className="px-3 py-3 text-slate-300 uppercase">{r.timeframe}</td>
+                          <td className="px-3 py-3">
+                            <span className={r.signal_type === 'BUY' ? 'signal-buy' : 'signal-sell'}>{r.signal_type === 'BUY' ? t('buy') : t('asShort')}</span>
+                          </td>
+                          <td className="px-3 py-3"><ScoreBar score={r.score} /></td>
+                          <td className="px-3 py-3 text-slate-300 tabular-nums whitespace-nowrap">{formatPrice(Number(r.price_at_signal), lang)}</td>
+                          <td className="px-3 py-3 text-slate-300 tabular-nums whitespace-nowrap">{formatPrice(Number(r.stop_loss), lang)}</td>
+                          <td className="px-3 py-3 text-slate-300 tabular-nums whitespace-nowrap">{formatPrice(Number(r.target1), lang)}</td>
+                          <td className="px-3 py-3"><StatusBadge status={r.status} t={t} /></td>
+                          <td className="px-3 py-3 tabular-nums"><PnlText r={r} lang={lang} /></td>
+                          <td className="px-3 py-3 tabular-nums text-slate-300">
+                            {r.r_multiple != null ? `${Number(r.r_multiple) >= 0 ? '+' : ''}${formatNumber(Number(r.r_multiple), lang, 2)}` : '—'}
+                          </td>
+                          <td className="px-3 py-3"><TimeStamp value={r.candle_close_time ?? r.signal_at} /></td>
+                          <td className="px-3 py-3 text-xs text-slate-400 whitespace-nowrap">{r.exit_at ? formatDate(r.exit_at, lang) : '—'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </>
           )}
 
           <Disclaimer />
@@ -293,21 +258,65 @@ export function SignalLabPage() {
   );
 }
 
+function PnlText({ r, lang }: { r: SignalOutcome; lang: 'fa' | 'en' }) {
+  if (r.pnl_pct == null) return <span className="text-slate-500 text-sm">—</span>;
+  const v = Number(r.pnl_pct);
+  return <span className={`text-sm font-semibold tabular-nums ${v >= 0 ? 'text-success-400' : 'text-error-400'}`}>{formatPercent(v, lang)}</span>;
+}
+
 function Header() {
   const { t } = useSettings();
   return (
-    <div className="flex items-center gap-3">
-      <TestTubes className="w-6 h-6 text-primary-400" />
-      <h1 className="text-2xl font-bold text-slate-100">{t('signalLab')}</h1>
+    <div className="flex items-center gap-3 min-w-0">
+      <TestTubes className="w-6 h-6 text-primary-400 shrink-0" />
+      <h1 className="text-xl sm:text-2xl font-bold text-slate-100 truncate">{t('signalLab')}</h1>
     </div>
   );
 }
 
-function Stat({ label, value, color = 'text-slate-100' }: { label: string; value: string; color?: string }) {
+function Stat({ label, value, hint, color = 'text-slate-100' }: { label: string; value: string; hint?: string; color?: string }) {
+  return (
+    <Card className="!p-3 sm:!p-4">
+      <p className="text-xs text-slate-400 mb-1 truncate">{label}</p>
+      <p className={`text-lg font-bold tabular-nums ${color}`}>{value}</p>
+      {hint && <p className="text-[11px] text-slate-500 mt-0.5 truncate">{hint}</p>}
+    </Card>
+  );
+}
+
+function BucketCard({
+  title,
+  data,
+  order,
+  upper = false,
+  labels = {},
+}: {
+  title: string;
+  data: Record<string, { wins: number; losses: number; expired: number; winRate: number; avgR: number }>;
+  order: string[];
+  upper?: boolean;
+  labels?: Record<string, string>;
+}) {
+  const { lang } = useSettings();
+  const keys = order.filter((k) => data[k]);
   return (
     <Card className="!p-4">
-      <p className="text-xs text-slate-400 mb-1">{label}</p>
-      <p className={`text-lg font-bold ${color}`}>{value}</p>
+      <SectionTitle className="!text-base !mb-3">{title}</SectionTitle>
+      <div className="space-y-2">
+        {keys.length === 0 && <p className="text-sm text-slate-500">—</p>}
+        {keys.map((k) => {
+          const v = data[k];
+          return (
+            <div key={k} className="flex items-center justify-between gap-2 text-sm">
+              <span className={`text-slate-300 ${upper ? 'uppercase' : ''}`}>{labels[k] ?? k}</span>
+              <span className="text-slate-400 text-xs sm:text-sm text-end">
+                {v.wins}W / {v.losses}L{v.expired ? ` / ${v.expired}E` : ''} · {formatPercent(v.winRate, lang)} ·{' '}
+                <span className={v.avgR >= 0 ? 'text-success-400' : 'text-error-400'}>{v.avgR >= 0 ? '+' : ''}{formatNumber(v.avgR, lang, 2)}R</span>
+              </span>
+            </div>
+          );
+        })}
+      </div>
     </Card>
   );
 }
@@ -327,5 +336,5 @@ function StatusBadge({ status, t }: { status: OutcomeStatus; t: (k: string) => s
     EXPIRED: t('slExpired'),
     CANCELLED: t('slCancelled'),
   };
-  return <span className={`font-medium ${map[status]}`}>{label[status]}</span>;
+  return <span className={`text-sm font-medium ${map[status]}`}>{label[status]}</span>;
 }
