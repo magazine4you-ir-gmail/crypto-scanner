@@ -2,7 +2,6 @@ import { useState, useEffect } from 'react';
 import { useSettings } from '@/contexts/SettingsContext';
 import { Card, SectionTitle, LoadingSpinner, Disclaimer } from '@/components/UI';
 import { TIMEFRAMES } from '@/types/market';
-import type { Timeframe } from '@/types/market';
 import { Settings as SettingsIcon, Globe, Moon, Sun, Sliders, Save } from 'lucide-react';
 
 export function SettingsPage() {
