@@ -17,7 +17,8 @@
     /* Path alias — depth-invariant imports for src (@/foo === src/foo from any file) */
     "baseUrl": ".",
     "paths": {
-      "@/*": ["src/*"]
+      "@/*": ["src/*"],
+      "@engine": ["supabase/functions/_shared/engine.ts"]
     },
 
     /* Linting */
