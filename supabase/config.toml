@@ -8,3 +8,7 @@ verify_jwt = false
 # The market-data proxy validates the user's JWT itself (see index.ts).
 [functions.market-data]
 verify_jwt = false
+
+# Manual tracking: the user's token is verified inside the function.
+[functions.track-signal]
+verify_jwt = false
