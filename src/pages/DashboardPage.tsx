@@ -1,18 +1,24 @@
 import { useEffect, useState } from 'react';
 import { useSettings } from '@/contexts/SettingsContext';
-import { fetchCoinGeckoMarkets, fetchProviderStatus, fetchTickers } from '@/services/marketData';
-import { getSignals } from '@/services/signalService';
+import { fetchCoinGeckoMarkets, fetchProviderStatus } from '@/services/marketData';
+import { fetchRecentActionable, type ScanResultRow } from '@/services/scanService';
+import { fetchKlines } from '@/services/marketData';
+import { detectRegime, closedCandles } from '@engine';
 import type { CoinMarketData, ProviderStatus } from '@/types/market';
-import type { SignalRecord } from '@/services/signalService';
+import type { MarketRegime } from '@/types/signal';
+import { useNavigate } from 'react-router-dom';
+import { TimeStamp, Chip } from '@/components/Responsive';
 import { Card, SectionTitle, LoadingSpinner, ErrorState, EmptyState, Disclaimer } from '@/components/UI';
 import { SignalBadge, RegimeBadge } from '@/components/Badges';
 import { formatPrice, formatPercent, formatCompact, formatDate } from '@/i18n/format';
-import { Bitcoin, TrendingUp, Activity, Server, Clock } from 'lucide-react';
+import { Bitcoin, TrendingUp, Activity, Server } from 'lucide-react';
 
 export function DashboardPage() {
   const { t, lang } = useSettings();
   const [markets, setMarkets] = useState<CoinMarketData[]>([]);
-  const [signals, setSignals] = useState<SignalRecord[]>([]);
+  const navigate = useNavigate();
+  const [signals, setSignals] = useState<ScanResultRow[]>([]);
+  const [btcRegime, setBtcRegime] = useState<MarketRegime>('UNCLEAR');
   const [status, setStatus] = useState<ProviderStatus | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -21,14 +27,16 @@ export function DashboardPage() {
     setLoading(true);
     setError(null);
     try {
-      const [mk, sig, st] = await Promise.all([
+      const [mk, sig, st, btc] = await Promise.all([
         fetchCoinGeckoMarkets(20, 1).catch(() => []),
-        getSignals(10).catch(() => []),
+        fetchRecentActionable(10).catch(() => [] as ScanResultRow[]),
         fetchProviderStatus().catch(() => null),
+        fetchKlines('BTCUSDT', '1d', 300).catch(() => []),
       ]);
       setMarkets(mk);
       setSignals(sig);
       setStatus(st);
+      if (btc.length > 0) setBtcRegime(detectRegime(closedCandles(btc), '1d').regime);
     } catch (e) {
       setError(e instanceof Error ? e.message : t('fetchError'));
     } finally {
@@ -54,11 +62,11 @@ export function DashboardPage() {
       <div>
         <SectionTitle>{t('marketOverview')}</SectionTitle>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          <MarketCard icon={Bitcoin} name="BTC" price={btc?.current_price ?? null} change={btc?.price_change_percentage_24h ?? null} lang={lang} t={t} />
-          <MarketCard icon={TrendingUp} name="ETH" price={eth?.current_price ?? null} change={eth?.price_change_percentage_24h ?? null} lang={lang} t={t} />
+          <MarketCard icon={Bitcoin} name="BTC" price={btc?.current_price ?? null} change={btc?.price_change_percentage_24h ?? null} lang={lang} />
+          <MarketCard icon={TrendingUp} name="ETH" price={eth?.current_price ?? null} change={eth?.price_change_percentage_24h ?? null} lang={lang} />
           <Card>
-            <p className="text-xs text-slate-400 mb-1">{t('marketRegime')}</p>
-            <RegimeBadge regime="UNCLEAR" />
+            <p className="text-xs text-slate-400 mb-1">{t('btcRegime')}</p>
+            <RegimeBadge regime={btcRegime} />
           </Card>
           <Card>
             <p className="text-xs text-slate-400 mb-1">{t('lastUpdate')}</p>
@@ -79,7 +87,7 @@ export function DashboardPage() {
                   <span className="font-semibold text-slate-100 uppercase">{m.symbol}</span>
                   <span className="text-xs text-slate-500">#{m.market_cap_rank}</span>
                 </div>
-                <span className={`text-sm font-medium ${m.price_change_percentage_24h >= 0 ? 'text-success-400' : 'text-error-400'}`}>
+                <span className={`text-sm font-medium ${(m.price_change_percentage_24h ?? 0) >= 0 ? 'text-success-400' : 'text-error-400'}`}>
                   {formatPercent(m.price_change_percentage_24h, lang)}
                 </span>
               </div>
@@ -94,33 +102,29 @@ export function DashboardPage() {
       <div>
         <SectionTitle>{t('recentSignals')}</SectionTitle>
         {signals.length === 0 ? (
-          <EmptyState message={t('noSignalsYet')} />
+          <EmptyState message={t('noSignalsYet2')} />
         ) : (
-          <div className="card overflow-hidden">
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead className="bg-surface-100 dark:bg-surface-100 text-slate-400">
-                  <tr>
-                    <th className="px-4 py-3 text-start font-medium">{t('asset')}</th>
-                    <th className="px-4 py-3 text-start font-medium">{t('signal')}</th>
-                    <th className="px-4 py-3 text-start font-medium">{t('score')}</th>
-                    <th className="px-4 py-3 text-start font-medium hidden sm:table-cell">{t('trend')}</th>
-                    <th className="px-4 py-3 text-start font-medium hidden sm:table-cell">{t('updated')}</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-surface-200 dark:divide-surface-200">
-                  {signals.map((s) => (
-                    <tr key={s.id} className="hover:bg-surface-100 dark:hover:bg-surface-100 transition-colors">
-                      <td className="px-4 py-3 font-medium text-slate-200">{s.symbol}</td>
-                      <td className="px-4 py-3"><SignalBadge type={s.signal_type as any} /></td>
-                      <td className="px-4 py-3 text-slate-300 tabular-nums">{s.score}</td>
-                      <td className="px-4 py-3 text-slate-300 hidden sm:table-cell">{s.trend}</td>
-                      <td className="px-4 py-3 text-slate-400 hidden sm:table-cell">{formatDate(s.created_at, lang)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+          <div className="space-y-2">
+            {signals.map((s) => (
+              <button
+                key={s.id}
+                onClick={() => navigate(`/asset/${s.symbol}?tf=${s.timeframe}`)}
+                className="card w-full text-start p-3 flex items-center justify-between gap-3 hover:bg-surface-100 active:bg-surface-100 transition-colors"
+              >
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="font-bold text-slate-100">{s.base_asset}</span>
+                    <Chip>{s.timeframe}</Chip>
+                    <SignalBadge type={s.signal_type} />
+                  </div>
+                  <div className="mt-1.5"><TimeStamp value={s.signal_since} /></div>
+                </div>
+                <div className="text-end shrink-0">
+                  <p className="text-sm font-semibold text-slate-100 tabular-nums">{formatPrice(s.price, lang)}</p>
+                  <p className="text-xs text-slate-400 tabular-nums mt-0.5">{t('score')}: {s.score}</p>
+                </div>
+              </button>
+            ))}
           </div>
         )}
       </div>
@@ -142,8 +146,16 @@ export function DashboardPage() {
   );
 }
 
-function MarketCard({ icon: Icon, name, price, change, lang, t }: any) {
-  const positive = change >= 0;
+interface MarketCardProps {
+  icon: React.ComponentType<{ className?: string }>;
+  name: string;
+  price: number | null;
+  change: number | null;
+  lang: 'fa' | 'en';
+}
+
+function MarketCard({ icon: Icon, name, price, change, lang }: MarketCardProps) {
+  const positive = (change ?? 0) >= 0;
   return (
     <Card>
       <div className="flex items-center gap-2 mb-2">
@@ -158,7 +170,15 @@ function MarketCard({ icon: Icon, name, price, change, lang, t }: any) {
   );
 }
 
-function ProviderCard({ name, configured, reachable, icon: Icon, t }: any) {
+interface ProviderCardProps {
+  name: string;
+  configured: boolean;
+  reachable: boolean;
+  icon: React.ComponentType<{ className?: string }>;
+  t: (k: string) => string;
+}
+
+function ProviderCard({ name, configured, reachable, icon: Icon, t }: ProviderCardProps) {
   return (
     <Card>
       <div className="flex items-center justify-between">
