@@ -243,8 +243,8 @@ export const translations: Translations = {
   // Auto scan
   autoScan: { fa: 'اسکن خودکار', en: 'Auto Scan' },
   asDescription: {
-    fa: 'اسکن ساعتی ۱۰۰ ارز برتر روی سرور (حتی وقتی سایت بسته است). سیگنال‌های خرید و شورت به‌همراه ورود، حد ضرر و هدف نمایش داده می‌شوند.',
-    en: 'Hourly server-side scan of the top 100 coins (runs even when the site is closed). Shows Buy and Short signals with entry, stop loss and target.',
+    fa: 'اسکن خودکار ۱۰۰ ارز برتر روی سرور (حتی وقتی سایت بسته است). هر تایم‌فریم بعد از بسته‌شدن کندلش بررسی می‌شود و فقط کندل‌های بسته‌شده استفاده می‌شوند. ورود، حد ضرر و هدف نمایش داده می‌شوند.',
+    en: 'Server-side scan of the top 100 coins (runs even when the site is closed). Each timeframe is scanned after its candle closes and only CLOSED candles are used. Shows entry, stop loss and targets.',
   },
   asShort: { fa: 'شورت', en: 'SHORT' },
   asBuyAndShort: { fa: 'خرید و شورت', en: 'Buy & Short' },
@@ -274,11 +274,9 @@ export const translations: Translations = {
   // Signal Lab
   signalLab: { fa: 'آزمایشگاه سیگنال', en: 'Signal Lab' },
   slDescription: {
-    fa: 'سیگنال‌های BUY و SELL صادرشده توسط اسکن خودکار اینجا ثبت می‌شوند و با قیمت واقعی بازار ارزیابی می‌گردند (برد / باخت / منقضی).',
-    en: 'BUY and SELL signals from auto-scan are recorded here and evaluated against live market prices (win / loss / expired).',
+    fa: 'هر سیگنال BUY/SELL اسکن خودکار فقط یک‌بار ثبت می‌شود و روی سرور با کندل‌های بسته‌شده ارزیابی می‌گردد (برد / باخت / منقضی). کارمزد و اسلیپیج (حدود ۰٫۲۵٪ رفت‌وبرگشت) کسر شده است.',
+    en: 'Each auto-scan BUY/SELL signal is recorded once and resolved on the server from CLOSED candles (win / loss / expired). Fees and slippage (~0.25% round trip) are deducted.',
   },
-  slEvaluate: { fa: 'ارزیابی سیگنال‌های باز', en: 'Evaluate Open Signals' },
-  slEvaluating: { fa: 'در حال ارزیابی...', en: 'Evaluating...' },
   slOpen: { fa: 'باز', en: 'Open' },
   slExpired: { fa: 'منقضی', en: 'Expired' },
   slCancelled: { fa: 'لغو شده', en: 'Cancelled' },
@@ -290,6 +288,40 @@ export const translations: Translations = {
   slByScore: { fa: 'بر اساس امتیاز', en: 'By Score' },
   avgPnl: { fa: 'میانگین PnL', en: 'Avg PnL' },
 
+  totalPnl: { fa: 'مجموع PnL', en: 'Total PnL' },
+
+  // Sorting / times / mobile
+  sortBy: { fa: 'ترتیب', en: 'Sort' },
+  sortNewest: { fa: 'جدیدترین سیگنال', en: 'Newest signal' },
+  sortScore: { fa: 'بیشترین امتیاز', en: 'Highest score' },
+  sortRank: { fa: 'رتبه بازار', en: 'Market rank' },
+  moreMenu: { fa: 'بیشتر', en: 'More' },
+  newBadge: { fa: 'جدید', en: 'New' },
+  staleRow: { fa: 'قدیمی', en: 'Stale' },
+  candleClosed: { fa: 'بسته‌شدن کندل', en: 'Candle closed' },
+  signalTime: { fa: 'زمان سیگنال', en: 'Signal time' },
+  scannedAt: { fa: 'زمان اسکن', en: 'Scanned' },
+  noFutures: { fa: 'بدون فیوچرز', en: 'No futures' },
+  closedCandleNote: {
+    fa: 'قیمت = بسته‌شدن آخرین کندل بسته‌شده، نه قیمت لحظه‌ای.',
+    en: 'Price = close of the last CLOSED candle, not the live price.',
+  },
+  expectancyR: { fa: 'امید ریاضی (R)', en: 'Expectancy (R)' },
+  breakEven: { fa: 'سربه‌سر win rate', en: 'Break-even win rate' },
+  byDirection: { fa: 'بر اساس جهت', en: 'By direction' },
+  exitTime: { fa: 'زمان خروج', en: 'Exit time' },
+  barsHeld: { fa: 'تعداد کندل', en: 'Bars held' },
+  lastScanOutcomes: { fa: 'ارزیابی توسط اسکن آخر', en: 'Evaluated by the last scan' },
+  netOfCosts: { fa: 'خالص پس از کارمزد', en: 'Net of fees' },
+  sortAndFilter: { fa: 'مرتب‌سازی و فیلتر', en: 'Sort & filter' },
+  scanFailedCoins: { fa: 'ارز ردشده', en: 'skipped' },
+  usingClosedCandles: {
+    fa: 'تحلیل فقط با کندل‌های بسته‌شده انجام می‌شود (بدون repaint).',
+    en: 'Analysis uses closed candles only (no repainting).',
+  },
+  btcRegime: { fa: 'رژیم بازار (BTC روزانه)', en: 'Market regime (BTC 1D)' },
+  noSignalsYet2: { fa: 'هنوز سیگنال فعالی وجود ندارد.', en: 'No active signals yet.' },
+
   // Lab / Live Analysis
   labSignal: { fa: 'سیگنال آزمایشگاه', en: 'Lab Signal' },
   liveAnalysis: { fa: 'تحلیل لحظه‌ای', en: 'Live Analysis' },
@@ -298,8 +330,8 @@ export const translations: Translations = {
     en: 'This is the signal recorded by auto-scan (it may differ from live analysis).',
   },
   liveAnalysisHint: {
-    fa: 'تحلیل فعلی موتور صفحه دارایی؛ شورت فقط در اسکن خودکار تولید می‌شود.',
-    en: 'Current client-engine analysis; SHORT signals come only from auto-scan.',
+    fa: 'تحلیل فعلی با همان موتور اسکن خودکار (فقط کندل‌های بسته‌شده).',
+    en: 'Current analysis using the same engine as auto-scan (closed candles only).',
   },
   backToLab: { fa: 'بازگشت به آزمایشگاه', en: 'Back to Signal Lab' },
   labResult: { fa: 'نتیجه آزمایش', en: 'Lab result' },
