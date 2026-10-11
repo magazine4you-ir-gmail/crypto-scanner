@@ -62,10 +62,15 @@ create unique index if not exists idx_scan_runs_single_running
 -- 5. scan_results ----------------------------------------------------------------------------
 alter table public.scan_results add column if not exists shortable boolean;
 
--- 6. signals ---------------------------------------------------------------------------------
+-- 6. signals (skipped automatically if the table does not exist in this database) ----------------
 do $$
 declare c record;
 begin
+  if to_regclass('public.signals') is null then
+    raise notice 'public.signals not found - section 6 skipped';
+    return;
+  end if;
+
   for c in
     select conname from pg_constraint
      where conrelid = 'public.signals'::regclass
@@ -74,12 +79,12 @@ begin
   loop
     execute format('alter table public.signals drop constraint %I', c.conname);
   end loop;
+
+  alter table public.signals
+    add constraint signals_signal_type_check
+    check (signal_type in ('BUY', 'SELL', 'WAIT', 'EXIT', 'NO_TRADE'));
+
+  drop policy if exists "delete_own_signals" on public.signals;
+  create policy "delete_own_signals" on public.signals
+    for delete to authenticated using (auth.uid() = created_by);
 end $$;
-
-alter table public.signals
-  add constraint signals_signal_type_check
-  check (signal_type in ('BUY', 'SELL', 'WAIT', 'EXIT', 'NO_TRADE'));
-
-drop policy if exists "delete_own_signals" on public.signals;
-create policy "delete_own_signals" on public.signals
-  for delete to authenticated using (auth.uid() = created_by);
