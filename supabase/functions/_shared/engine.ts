@@ -20,6 +20,8 @@ export interface Candle {
   close: number;
   volume: number;
   closeTime: number;
+  /** Aggressive-buyer volume (Binance kline field 9). Optional: used by the Fast Scalp delta filter only. */
+  takerBuyVolume?: number;
 }
 
 export type SignalType = 'BUY' | 'SELL' | 'WAIT' | 'EXIT' | 'NO_TRADE';
@@ -183,6 +185,61 @@ export function volatilityProfile(timeframe?: string): VolatilityProfile {
 
 /** Round-trip trading cost (fees + slippage) in percent, deducted from every paper trade. */
 export const TRADE_COST_PCT = 0.25;
+
+// =====================================================================
+// Symbols / quote assets (USDT pairs and BTC pairs share one engine)
+// =====================================================================
+
+/**
+ * Quote currencies the scanner works with. A signal on ETHBTC is computed exactly like one on ETHUSDT:
+ * same closed-candle engine, same scoring, same risk plan. Prices are simply measured in BTC.
+ */
+export type QuoteAsset = 'USDT' | 'BTC';
+export const QUOTE_ASSETS: readonly QuoteAsset[] = ['USDT', 'BTC'];
+
+/** Bare tickers that END in "BTC" but are base assets, not BTC pairs (so "WBTC" is not read as W/BTC). */
+const BTC_SUFFIX_BASES = new Set(['WBTC', 'CBBTC', 'LBTC', 'TBTC', 'SOLVBTC', 'FBTC', 'UNIBTC', 'PUMPBTC']);
+
+/** "ETHBTC" -> { base: "ETH", quote: "BTC" }; "SOLUSDT" -> { base: "SOL", quote: "USDT" }; bare tickers -> null. */
+export function splitSymbol(symbol: string): { base: string; quote: QuoteAsset } | null {
+  const s = String(symbol ?? '').toUpperCase().trim();
+  if (s.length > 4 && s.endsWith('USDT')) return { base: s.slice(0, -4), quote: 'USDT' };
+  if (s.length > 3 && s.endsWith('BTC') && !BTC_SUFFIX_BASES.has(s)) return { base: s.slice(0, -3), quote: 'BTC' };
+  return null;
+}
+
+export function quoteOf(symbol: string): QuoteAsset {
+  return splitSymbol(symbol)?.quote ?? 'USDT';
+}
+
+export function baseOf(symbol: string): string {
+  return splitSymbol(symbol)?.base ?? String(symbol ?? '').toUpperCase().trim();
+}
+
+/** Full pair for any input: "eth" -> ETHUSDT, "ETHBTC" -> ETHBTC, "wbtc" -> WBTCUSDT. */
+export function normalizeSymbol(input: string, defaultQuote: QuoteAsset = 'USDT'): string {
+  const s = String(input ?? '').toUpperCase().trim();
+  return splitSymbol(s) ? s : s + defaultQuote;
+}
+
+/** The same coin quoted in the other currency: ETHUSDT <-> ETHBTC. BTC itself has no BTC pair. */
+export function counterpartSymbol(symbol: string): string | null {
+  const p = splitSymbol(symbol);
+  if (!p) return null;
+  if (p.quote === 'USDT') return p.base === 'BTC' ? null : `${p.base}BTC`;
+  return `${p.base}USDT`;
+}
+
+/** Decimals needed to show a price legibly: BTC pairs trade at 0.00001-0.1, USDT pairs at 0.0001-100000. */
+export function priceDecimals(price: number): number {
+  const abs = Math.abs(price);
+  if (!Number.isFinite(abs) || abs === 0) return 2;
+  if (abs < 0.001) return 8;
+  if (abs < 1) return 6;
+  if (abs < 10) return 4;
+  if (abs < 1000) return 2;
+  return abs >= 1_000_000 ? 0 : 2;
+}
 
 // =====================================================================
 // Candle helpers
