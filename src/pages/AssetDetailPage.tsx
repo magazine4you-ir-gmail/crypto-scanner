@@ -3,6 +3,9 @@ import { useParams, Link, useSearchParams } from 'react-router-dom';
 import { useSettings } from '@/contexts/SettingsContext';
 import { fetchKlinesValidated, fetchTickers } from '@/services/marketData';
 import { analyze, optionsFromSettings } from '@/engine/signalEngine';
+import { normalizeSymbol, splitSymbol, counterpartSymbol } from '@engine';
+import { computeConfluence, confluenceFor } from '@/engine/confluence';
+import { QuoteChip, ConfluenceBadge } from '@/components/Quote';
 import { saveSignal, getSignalHistory } from '@/services/signalService';
 import {
   fetchOutcomeById,
@@ -45,6 +48,8 @@ export function AssetDetailPage() {
   const [labOutcome, setLabOutcome] = useState<SignalOutcome | null>(null);
   const [labHistory, setLabHistory] = useState<SignalOutcome[]>([]);
   const [ticker, setTicker] = useState<TickerStat | null>(null);
+  /** The same coin quoted in the other currency (ETHUSDT <-> ETHBTC), analysed with the same settings. */
+  const [other, setOther] = useState<{ symbol: string; signal: SignalResult | null } | null>(null);
   const [loading, setLoading] = useState(true);
   const [analyzing, setAnalyzing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -61,7 +66,7 @@ export function AssetDetailPage() {
     setLoading(true);
     setError(null);
     try {
-      const fullSymbol = symbol.endsWith('USDT') ? symbol : `${symbol}USDT`;
+      const fullSymbol = normalizeSymbol(symbol);
 
       const [klineData, hist, tickers, outcomes] = await Promise.all([
         fetchKlinesValidated(fullSymbol, timeframe, 400).catch(() => ({
@@ -78,6 +83,19 @@ export function AssetDetailPage() {
         fetchTickers([fullSymbol]).catch(() => []),
         fetchOutcomesBySymbol(fullSymbol, 40).catch(() => [] as SignalOutcome[]),
       ]);
+
+      // counterpart pair (best effort: a coin may not be listed in both currencies)
+      const cpSymbol = counterpartSymbol(fullSymbol);
+      let cp: { symbol: string; signal: SignalResult | null } | null = null;
+      if (cpSymbol) {
+        try {
+          const o = await fetchKlinesValidated(cpSymbol, timeframe, 400);
+          cp = { symbol: cpSymbol, signal: o.candles.length >= 50 ? analyze(cpSymbol, timeframe, o.candles, optionsFromSettings(settings)) : null };
+        } catch {
+          cp = null;
+        }
+      }
+      setOther(cp);
 
       setCandles(klineData.candles);
       setHistory(hist);
@@ -122,7 +140,7 @@ export function AssetDetailPage() {
     if (!symbol || candles.length < 50) return;
     setAnalyzing(true);
     try {
-      const fullSymbol = symbol.endsWith('USDT') ? symbol : `${symbol}USDT`;
+      const fullSymbol = normalizeSymbol(symbol);
       const result = analyze(fullSymbol, timeframe, candles, optionsFromSettings(settings));
       setSignal(result);
       await saveSignal(result).catch(() => {});
@@ -134,7 +152,13 @@ export function AssetDetailPage() {
   if (loading) return <LoadingSpinner size="lg" />;
   if (error) return <ErrorState message={error} onRetry={() => void load()} />;
 
-  const baseSymbol = symbol?.replace(/USDT$/i, '') ?? '';
+  const pair = splitSymbol(symbol ? normalizeSymbol(symbol) : '') ?? { base: symbol ?? '', quote: 'USDT' as const };
+  const baseSymbol = pair.base;
+  const dual = (() => {
+    if (!signal || !other?.signal) return null;
+    const map = computeConfluence([signal, other.signal].map((r) => ({ symbol: r.symbol, timeframe: r.timeframe, signalType: r.signalType, score: r.score })));
+    return confluenceFor(map, signal.symbol, signal.timeframe);
+  })();
   const swings = candles.length > 10 ? findSwingPoints(candles, 3) : [];
   const levels = candles.length > 10 ? findSR(candles, swings) : [];
   const supportPrices = levels.filter((l) => l.type === 'SUPPORT').slice(0, 3).map((l) => l.price);
@@ -163,7 +187,7 @@ export function AssetDetailPage() {
           <ArrowLeft className="w-5 h-5 rtl:rotate-180" />
         </Link>
         <div>
-          <h1 className="text-xl sm:text-2xl font-bold text-slate-100">{baseSymbol}/USDT</h1>
+          <h1 className="text-xl sm:text-2xl font-bold text-slate-100">{baseSymbol}/{pair.quote}</h1>
           {ticker && (
             <div className="flex items-center gap-3 mt-1">
               <span className="text-lg font-semibold text-slate-200">
@@ -180,6 +204,34 @@ export function AssetDetailPage() {
           )}
         </div>
       </div>
+
+      {other && (
+        <Card className="!p-3 sm:!p-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-2 text-sm text-slate-300">
+              <span>{lang === 'fa' ? 'همین ارز در جفت دیگر' : 'Same coin, other pair'}</span>
+              <Link to={`/asset/${other.symbol}?tf=${timeframe}`} className="inline-flex items-center gap-1.5 font-semibold text-primary-400 hover:underline">
+                {baseSymbol}/{splitSymbol(other.symbol)?.quote} <QuoteChip quote={splitSymbol(other.symbol)?.quote ?? 'USDT'} />
+              </Link>
+            </div>
+            <div className="flex items-center gap-2">
+              {other.signal ? (
+                <>
+                  <SignalBadge type={other.signal.signalType} quote={splitSymbol(other.symbol)?.quote} />
+                  <ScoreBar score={other.signal.score} />
+                </>
+              ) : (
+                <span className="text-xs text-slate-500">—</span>
+              )}
+            </div>
+          </div>
+          {dual && dual.kind !== 'NONE' && (
+            <div className="mt-3 pt-3 border-t border-surface-200">
+              <ConfluenceBadge c={dual} showLegs />
+            </div>
+          )}
+        </Card>
+      )}
 
       <div className="flex gap-2 overflow-x-auto no-scrollbar pb-1">
         {TIMEFRAMES.map((tf) => (
@@ -301,7 +353,7 @@ export function AssetDetailPage() {
           )}
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4 mb-4">
             <InfoBox label={t('signal')}>
-              <SignalBadge type={signal.signalType} />
+              <SignalBadge type={signal.signalType} quote={pair.quote} />
             </InfoBox>
             <InfoBox label={t('score')}>
               <ScoreBar score={signal.score} />
