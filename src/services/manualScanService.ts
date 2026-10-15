@@ -1,5 +1,6 @@
 import { supabase } from './supabaseClient';
 import type { SignalResult } from '@/types/signal';
+import { baseOf } from '@engine';
 
 export interface ManualScanRun {
   id: string;
@@ -110,7 +111,7 @@ export async function insertManualScanResults(
     const payload = slice.map(({ result: r, rank }) => ({
       run_id: runId,
       symbol: r.symbol,
-      base_asset: r.symbol.replace(/USDT$/i, ''),
+      base_asset: baseOf(r.symbol),
       market_rank: rank,
       signal_type: r.signalType,
       bias: r.bias,
