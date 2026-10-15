@@ -4,7 +4,9 @@
 // Hourly server-side scan of the top coins, called by pg_cron (see supabase/cron_setup.sql).
 //
 // What one run does:
-//   1. Builds the coin universe (CoinGecko market cap ∩ Binance spot USDT, min liquidity).
+//   1. Builds the coin universe (CoinGecko market cap ∩ Binance spot, min liquidity):
+//        - USDT pairs for the top TOP_N coins (ETHUSDT, SOLUSDT, ...)
+//        - BTC pairs for the top BTC_TOP_N coins (ETHBTC, SOLBTC, ...): same engine, prices measured in BTC.
 //   2. Scans only the (coin, timeframe) pairs whose candle closed since their last scan.
 //   3. Upserts the latest result per (symbol, timeframe) into `scan_results`.
 //   4. Signal Lab (paper trading):
@@ -42,6 +44,8 @@ interface Candle {
   close: number;
   volume: number;
   closeTime: number;
+  /** Aggressive-buyer volume (Binance kline field 9). Optional: used by the Fast Scalp delta filter only. */
+  takerBuyVolume?: number;
 }
 
 type SignalType = 'BUY' | 'SELL' | 'WAIT' | 'EXIT' | 'NO_TRADE';
@@ -205,6 +209,61 @@ function volatilityProfile(timeframe?: string): VolatilityProfile {
 
 /** Round-trip trading cost (fees + slippage) in percent, deducted from every paper trade. */
 const TRADE_COST_PCT = 0.25;
+
+// =====================================================================
+// Symbols / quote assets (USDT pairs and BTC pairs share one engine)
+// =====================================================================
+
+/**
+ * Quote currencies the scanner works with. A signal on ETHBTC is computed exactly like one on ETHUSDT:
+ * same closed-candle engine, same scoring, same risk plan. Prices are simply measured in BTC.
+ */
+type QuoteAsset = 'USDT' | 'BTC';
+const QUOTE_ASSETS: readonly QuoteAsset[] = ['USDT', 'BTC'];
+
+/** Bare tickers that END in "BTC" but are base assets, not BTC pairs (so "WBTC" is not read as W/BTC). */
+const BTC_SUFFIX_BASES = new Set(['WBTC', 'CBBTC', 'LBTC', 'TBTC', 'SOLVBTC', 'FBTC', 'UNIBTC', 'PUMPBTC']);
+
+/** "ETHBTC" -> { base: "ETH", quote: "BTC" }; "SOLUSDT" -> { base: "SOL", quote: "USDT" }; bare tickers -> null. */
+function splitSymbol(symbol: string): { base: string; quote: QuoteAsset } | null {
+  const s = String(symbol ?? '').toUpperCase().trim();
+  if (s.length > 4 && s.endsWith('USDT')) return { base: s.slice(0, -4), quote: 'USDT' };
+  if (s.length > 3 && s.endsWith('BTC') && !BTC_SUFFIX_BASES.has(s)) return { base: s.slice(0, -3), quote: 'BTC' };
+  return null;
+}
+
+function quoteOf(symbol: string): QuoteAsset {
+  return splitSymbol(symbol)?.quote ?? 'USDT';
+}
+
+function baseOf(symbol: string): string {
+  return splitSymbol(symbol)?.base ?? String(symbol ?? '').toUpperCase().trim();
+}
+
+/** Full pair for any input: "eth" -> ETHUSDT, "ETHBTC" -> ETHBTC, "wbtc" -> WBTCUSDT. */
+function normalizeSymbol(input: string, defaultQuote: QuoteAsset = 'USDT'): string {
+  const s = String(input ?? '').toUpperCase().trim();
+  return splitSymbol(s) ? s : s + defaultQuote;
+}
+
+/** The same coin quoted in the other currency: ETHUSDT <-> ETHBTC. BTC itself has no BTC pair. */
+function counterpartSymbol(symbol: string): string | null {
+  const p = splitSymbol(symbol);
+  if (!p) return null;
+  if (p.quote === 'USDT') return p.base === 'BTC' ? null : `${p.base}BTC`;
+  return `${p.base}USDT`;
+}
+
+/** Decimals needed to show a price legibly: BTC pairs trade at 0.00001-0.1, USDT pairs at 0.0001-100000. */
+function priceDecimals(price: number): number {
+  const abs = Math.abs(price);
+  if (!Number.isFinite(abs) || abs === 0) return 2;
+  if (abs < 0.001) return 8;
+  if (abs < 1) return 6;
+  if (abs < 10) return 4;
+  if (abs < 1000) return 2;
+  return abs >= 1_000_000 ? 0 : 2;
+}
 
 // =====================================================================
 // Candle helpers
@@ -1053,11 +1112,13 @@ function resolveTrade(
 // ---------------------------------------------------------------------
 const TIMEFRAMES = ["1h", "4h", "1d"];
 const TOP_N = 100;
+const BTC_TOP_N = 50; // BTC pairs are scanned for the top coins only (keeps Binance request weight in check)
 const CANDLE_LIMIT = 300;
 const CONCURRENCY = 8;
 const SCAN_BUDGET_MS = 85_000; // stop starting scan work after this
 const EVAL_BUDGET_MS = 125_000; // stop evaluating outcomes after this (wall-clock limit ~150s)
-const MIN_QUOTE_VOLUME = 2_000_000; // USDT, 24h — filters illiquid / ticker-collision coins
+const MIN_QUOTE_VOLUME = 2_000_000; // USD, 24h — filters illiquid / ticker-collision coins (USDT pairs)
+const MIN_BTC_PAIR_VOLUME_USD = 300_000; // BTC pairs trade ~10x thinner; volume is converted to USD before comparing
 const KEEP_RUNS_DAYS = 14;
 const KEEP_SIGNALS_DAYS = 30;
 const STALE_ROW_DAYS = 3;
@@ -1155,33 +1216,45 @@ function json(body: unknown, status = 200): Response {
 interface Coin {
   symbol: string;
   base: string;
+  quote: QuoteAsset;
   name: string;
   rank: number;
 }
 
-async function getTradableUsdtPairs(): Promise<Map<string, string>> {
+/** Tradable spot pairs quoted in USDT or BTC: symbol -> { base, quote }. */
+async function getTradablePairs(): Promise<Map<string, { base: string; quote: QuoteAsset }>> {
   const data = (await fetchJson(`${BINANCE_BASE}/api/v3/exchangeInfo`)) as { symbols?: Record<string, unknown>[] };
-  const map = new Map<string, string>();
+  const map = new Map<string, { base: string; quote: QuoteAsset }>();
   for (const s of data.symbols ?? []) {
-    if (s.status === "TRADING" && s.quoteAsset === "USDT" && s.isSpotTradingAllowed !== false) {
-      map.set(String(s.symbol), String(s.baseAsset).toUpperCase());
+    const quote = String(s.quoteAsset);
+    if (s.status === "TRADING" && (quote === "USDT" || quote === "BTC") && s.isSpotTradingAllowed !== false) {
+      map.set(String(s.symbol), { base: String(s.baseAsset).toUpperCase(), quote });
     }
   }
   return map;
 }
 
-async function getQuoteVolumes(): Promise<Map<string, number> | null> {
+/** 24h quote volume in USD for every symbol (BTC-pair volume is converted with the BTCUSDT price). */
+async function getUsdVolumes(): Promise<Map<string, number> | null> {
   try {
-    const tickers = (await fetchJson(`${BINANCE_BASE}/api/v3/ticker/24hr`)) as { symbol: string; quoteVolume: string }[];
-    return new Map(tickers.map((t) => [t.symbol, Number(t.quoteVolume)]));
+    const tickers = (await fetchJson(`${BINANCE_BASE}/api/v3/ticker/24hr`)) as { symbol: string; quoteVolume: string; lastPrice: string }[];
+    const btcUsd = Number(tickers.find((t) => t.symbol === "BTCUSDT")?.lastPrice ?? 0);
+    const out = new Map<string, number>();
+    for (const t of tickers) {
+      const v = Number(t.quoteVolume);
+      if (quoteOf(t.symbol) === "BTC" && t.symbol.endsWith("BTC")) out.set(t.symbol, btcUsd > 0 ? v * btcUsd : 0);
+      else out.set(t.symbol, v);
+    }
+    return out;
   } catch {
     return null;
   }
 }
 
 async function buildUniverse(n: number): Promise<{ coins: Coin[]; source: string }> {
-  const [tradable, volumes] = await Promise.all([getTradableUsdtPairs(), getQuoteVolumes()]);
-  const liquid = (symbol: string) => volumes === null || (volumes.get(symbol) ?? 0) >= MIN_QUOTE_VOLUME;
+  const [tradable, volumes] = await Promise.all([getTradablePairs(), getUsdVolumes()]);
+  const minVolume = (symbol: string) => (tradable.get(symbol)?.quote === "BTC" ? MIN_BTC_PAIR_VOLUME_USD : MIN_QUOTE_VOLUME);
+  const liquid = (symbol: string) => volumes === null || (volumes.get(symbol) ?? 0) >= minVolume(symbol);
 
   try {
     const key = Deno.env.get("COINGECKO_API_KEY");
@@ -1191,29 +1264,54 @@ async function buildUniverse(n: number): Promise<{ coins: Coin[]; source: string
       headers,
       2,
     )) as { symbol: string; name: string; market_cap_rank: number | null }[];
-    const coins: Coin[] = [];
+
+    const usdtCoins: Coin[] = [];
+    const btcCoins: Coin[] = [];
     const seen = new Set<string>();
+    const seenBtc = new Set<string>();
     for (const c of cg) {
       const base = String(c.symbol).toUpperCase();
-      const symbol = `${base}USDT`;
-      if (EXCLUDED_BASES.has(base) || seen.has(symbol) || !tradable.has(symbol) || !liquid(symbol)) continue;
-      seen.add(symbol);
-      coins.push({ symbol, base, name: c.name, rank: c.market_cap_rank ?? coins.length + 1 });
-      if (coins.length >= n) break;
+      if (EXCLUDED_BASES.has(base)) continue;
+      const rank = c.market_cap_rank ?? usdtCoins.length + 1;
+
+      const usdt = `${base}USDT`;
+      if (usdtCoins.length < n && !seen.has(usdt) && tradable.has(usdt) && liquid(usdt)) {
+        seen.add(usdt);
+        usdtCoins.push({ symbol: usdt, base, quote: "USDT", name: c.name, rank });
+      }
+      // BTC pairs: top BTC_TOP_N by market cap. BTC itself has no BTC pair.
+      const btc = `${base}BTC`;
+      if (base !== "BTC" && btcCoins.length < BTC_TOP_N && !seenBtc.has(btc) && tradable.has(btc) && liquid(btc)) {
+        seenBtc.add(btc);
+        btcCoins.push({ symbol: btc, base, quote: "BTC", name: c.name, rank });
+      }
+      if (usdtCoins.length >= n && btcCoins.length >= BTC_TOP_N) break;
     }
-    if (coins.length >= Math.min(n, 50)) return { coins, source: "coingecko-marketcap" };
+    if (usdtCoins.length >= Math.min(n, 50)) return { coins: [...usdtCoins, ...btcCoins], source: "coingecko-marketcap" };
   } catch {
     // fall through
   }
 
-  const tickers = volumes ?? (await getQuoteVolumes());
+  const tickers = volumes ?? (await getUsdVolumes());
   if (!tickers) throw new Error("cannot build universe: Binance 24h tickers unavailable");
-  const ranked = [...tickers.entries()]
-    .filter(([symbol, vol]) => tradable.has(symbol) && !EXCLUDED_BASES.has(tradable.get(symbol)!) && vol >= MIN_QUOTE_VOLUME)
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, n);
+  const rankedBy = (quote: QuoteAsset, limit: number) =>
+    [...tickers.entries()]
+      .filter(([symbol, vol]) => {
+        const t = tradable.get(symbol);
+        return t !== undefined && t.quote === quote && !EXCLUDED_BASES.has(t.base) && !(quote === "BTC" && t.base === "BTC") && vol >= minVolume(symbol);
+      })
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, limit)
+      .map(([symbol]) => symbol);
+  const usdtSymbols = rankedBy("USDT", n);
+  // a coin keeps ONE rank across both of its pairs (its USDT volume rank); BTC-only coins rank after them
+  const rankOfBase = new Map(usdtSymbols.map((symbol, i) => [tradable.get(symbol)!.base, i + 1]));
+  const toCoin = (symbol: string, quote: QuoteAsset, i: number): Coin => {
+    const base = tradable.get(symbol)!.base;
+    return { symbol, base, quote, name: base, rank: rankOfBase.get(base) ?? usdtSymbols.length + i + 1 };
+  };
   return {
-    coins: ranked.map(([symbol], i) => ({ symbol, base: tradable.get(symbol)!, name: tradable.get(symbol)!, rank: i + 1 })),
+    coins: [...usdtSymbols.map((x, i) => toCoin(x, "USDT", i)), ...rankedBy("BTC", BTC_TOP_N).map((x, i) => toCoin(x, "BTC", i))],
     source: "binance-volume",
   };
 }
@@ -1515,9 +1613,10 @@ Deno.serve(async (req: Request) => {
     }, t0 + SCAN_BUDGET_MS);
 
     // shortable flag for SELL candidates (only fetched when needed)
-    if (rows.some((r) => r.signal_type === "SELL")) {
+    // (BTC pairs have no USDT perpetual: a SELL there means "rotate into BTC", so the flag stays null)
+    if (rows.some((r) => r.signal_type === "SELL" && quoteOf(r.symbol) === "USDT")) {
       const perps = await getFuturesPerps();
-      if (perps) for (const r of rows) if (r.signal_type === "SELL") r.shortable = perps.has(r.symbol);
+      if (perps) for (const r of rows) if (r.signal_type === "SELL" && quoteOf(r.symbol) === "USDT") r.shortable = perps.has(r.symbol);
     }
 
     const freshActionable = rows.filter(
@@ -1587,7 +1686,12 @@ Deno.serve(async (req: Request) => {
       ok: status !== "failed",
       status,
       run_id: runId,
-      universe: { count: coins.length, source },
+      universe: {
+        count: coins.length,
+        usdt: coins.filter((c) => c.quote === "USDT").length,
+        btc: coins.filter((c) => c.quote === "BTC").length,
+        source,
+      },
       timeframes_scanned: scannedTfs,
       scanned: rows.length,
       failed,
