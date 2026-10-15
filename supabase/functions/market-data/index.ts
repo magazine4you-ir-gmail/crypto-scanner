@@ -122,6 +122,7 @@ async function handleKlines(params: URLSearchParams) {
     close: Number(row[4]),
     volume: Number(row[5]),
     closeTime: row[6] as number,
+    takerBuyVolume: row[9] === undefined ? undefined : Number(row[9]),
   }));
 
   return jsonResponse({ provider: "binance", symbol, interval, candles, fromCache });
@@ -140,7 +141,8 @@ async function handleTicker(params: URLSearchParams) {
 }
 
 async function handleExchangeInfo() {
-  const cached = await readCache("binance", "exchangeInfoFiltered");
+  // v2: USDT + BTC quoted pairs (v1 cache held USDT only)
+  const cached = await readCache("binance", "exchangeInfoFilteredV2");
   if (cached !== null) {
     return jsonResponse({ provider: "binance", symbols: cached, fromCache: true });
   }
@@ -154,10 +156,10 @@ async function handleExchangeInfo() {
 
   const raw = (data as { symbols: Record<string, unknown>[] }).symbols;
   const symbols = raw
-    .filter((s) => s.status === "TRADING" && s.quoteAsset === "USDT" && s.isSpotTradingAllowed)
+    .filter((s) => s.status === "TRADING" && (s.quoteAsset === "USDT" || s.quoteAsset === "BTC") && s.isSpotTradingAllowed)
     .map((s) => ({ symbol: s.symbol, baseAsset: s.baseAsset, quoteAsset: s.quoteAsset }));
 
-  await writeCache("binance", "exchangeInfoFiltered", symbols, TTL.exchangeInfo);
+  await writeCache("binance", "exchangeInfoFilteredV2", symbols, TTL.exchangeInfo);
 
   return jsonResponse({ provider: "binance", symbols, fromCache: false });
 }
