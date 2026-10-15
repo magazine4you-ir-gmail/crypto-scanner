@@ -5,7 +5,8 @@ export function formatPrice(value: number | null | undefined, lang: Lang): strin
   const locale = lang === 'fa' ? 'fa-IR' : 'en-US';
   let fractionDigits = 2;
   const abs = Math.abs(value);
-  if (abs < 1) fractionDigits = 6;
+  if (abs < 0.001) fractionDigits = 8;
+  else if (abs < 1) fractionDigits = 6;
   else if (abs < 10) fractionDigits = 4;
   else if (abs < 1000) fractionDigits = 2;
   else if (abs >= 1_000_000) fractionDigits = 0;
