@@ -5,12 +5,12 @@
 // the analysis (entry / stop / targets) is recomputed HERE from the latest closed candle with the default
 // settings, so Signal Lab statistics cannot be forged.
 //
-// POST  Authorization: Bearer <user access token>   body: { "symbol": "SOLUSDT", "timeframe": "1h" }
+// POST  Authorization: Bearer <user access token>   body: { "symbol": "SOLUSDT" | "SOLBTC", "timeframe": "1h" }
 // Deploy with --no-verify-jwt (the token is verified inside, see below).
 
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "npm:@supabase/supabase-js@2.57.4";
-import { analyzeCore, closedCandles, lastBoundary, type Candle } from "../_shared/engine.ts";
+import { analyzeCore, closedCandles, lastBoundary, normalizeSymbol, splitSymbol, type Candle } from "../_shared/engine.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -20,7 +20,7 @@ const corsHeaders = {
 
 const BINANCE_BASE = "https://data-api.binance.vision";
 const ALLOWED_TF = new Set(["15m", "30m", "1h", "4h", "1d"]);
-const SYMBOL_RE = /^[A-Z0-9]{2,15}USDT$/;
+const SYMBOL_RE = /^[A-Z0-9]{2,15}(USDT|BTC)$/; // dollar pairs and bitcoin pairs (ETHBTC)
 const MAX_OPEN_PER_USER = 20;
 const MAX_PER_DAY = 50;
 
@@ -75,8 +75,7 @@ Deno.serve(async (req: Request) => {
   } catch {
     return json({ ok: false, reason: "bad_request" }, 400);
   }
-  let symbol = String(body.symbol ?? "").toUpperCase().trim();
-  if (symbol && !symbol.endsWith("USDT")) symbol += "USDT";
+  const symbol = normalizeSymbol(String(body.symbol ?? ""));
   const timeframe = String(body.timeframe ?? "");
   if (!SYMBOL_RE.test(symbol) || !ALLOWED_TF.has(timeframe)) return json({ ok: false, reason: "bad_request" }, 400);
 
@@ -125,7 +124,7 @@ Deno.serve(async (req: Request) => {
     .from("signal_outcomes")
     .insert({
       symbol,
-      base_asset: symbol.replace(/USDT$/, ""),
+      base_asset: splitSymbol(symbol)?.base ?? symbol,
       timeframe,
       signal_type: a.signalType,
       score: a.score,
