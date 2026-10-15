@@ -10,6 +10,8 @@ export interface Candle {
   close: number;
   volume: number;
   closeTime: number;
+  /** Aggressive-buyer volume (Binance kline field 9), when the feed provides it. */
+  takerBuyVolume?: number;
 }
 
 export interface SymbolInfo {
