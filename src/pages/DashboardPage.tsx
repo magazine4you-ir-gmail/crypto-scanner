@@ -1,3 +1,5 @@
+import { QuoteChip } from '@/components/Quote';
+import { quoteOf } from '@engine';
 import { useEffect, useState } from 'react';
 import { useSettings } from '@/contexts/SettingsContext';
 import { fetchCoinGeckoMarkets, fetchProviderStatus } from '@/services/marketData';
@@ -114,8 +116,9 @@ export function DashboardPage() {
                 <div className="min-w-0">
                   <div className="flex items-center gap-2 flex-wrap">
                     <span className="font-bold text-slate-100">{s.base_asset}</span>
+                    <QuoteChip quote={quoteOf(s.symbol)} />
                     <Chip>{s.timeframe}</Chip>
-                    <SignalBadge type={s.signal_type} />
+                    <SignalBadge type={s.signal_type} quote={quoteOf(s.symbol)} />
                   </div>
                   <div className="mt-1.5"><TimeStamp value={s.signal_since} /></div>
                 </div>
