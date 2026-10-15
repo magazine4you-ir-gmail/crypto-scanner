@@ -2,7 +2,9 @@ import { useState, useCallback, useRef, useMemo, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useSettings } from '@/contexts/SettingsContext';
 import { useAuth } from '@/contexts/AuthContext';
-import { fetchKlinesValidated, fetchScanUniverse } from '@/services/marketData';
+import { fetchKlinesValidated, fetchScanUniverse, type QuoteMode } from '@/services/marketData';
+import { quoteOf } from '@engine';
+import { computeConfluence, confluenceFor, isDualSignal } from '@/engine/confluence';
 import { analyze, optionsFromSettings } from '@/engine/signalEngine';
 import type { SignalResult } from '@/types/signal';
 import type { Timeframe } from '@/types/market';
@@ -11,6 +13,7 @@ import { Card, LoadingSpinner, ErrorState, EmptyState, Disclaimer } from '@/comp
 import { SignalBadge, TrendBadge, RiskBadge, ScoreBar } from '@/components/Badges';
 import { Metric, TimeStamp, Chip } from '@/components/Responsive';
 import { TrackButton } from '@/components/TrackButton';
+import { PairLabel, ConfluenceBadge } from '@/components/Quote';
 import { formatPrice, formatNumber, formatDate } from '@/i18n/format';
 import { Radar, Filter, ChevronRight, History } from 'lucide-react';
 import {
@@ -30,6 +33,7 @@ const UNIVERSE_OPTIONS = [10, 20, 50, 100];
 const CONCURRENCY = 5;
 
 type Sort = 'score' | 'newest' | 'rank';
+type PairFilter = 'ALL' | 'USDT' | 'BTC' | 'DUAL';
 
 interface Row {
   result: SignalResult;
@@ -94,6 +98,9 @@ export function ScannerPage() {
   const [signalFilter, setSignalFilter] = useState('ALL');
   const [sort, setSort] = useState<Sort>('score');
   const [sharePublic, setSharePublic] = useState(false);
+  const [quoteMode, setQuoteMode] = useState<QuoteMode>('BOTH');
+  const [pairFilter, setPairFilter] = useState<PairFilter>('ALL');
+  const [btcMissing, setBtcMissing] = useState(false);
 
   const [results, setResults] = useState<Row[]>([]);
   const [loading, setLoading] = useState(false);
@@ -178,7 +185,8 @@ export function ScannerPage() {
     let dbRunId: string | null = null;
 
     try {
-      const coins = await fetchScanUniverse(universe);
+      const { targets: coins, btcListed } = await fetchScanUniverse(universe, quoteMode);
+      setBtcMissing(quoteMode !== 'USDT' && !btcListed);
       if (coins.length === 0) {
         setError(t('fetchError'));
         return;
@@ -199,6 +207,7 @@ export function ScannerPage() {
               },
               risk_percent: settings?.risk_percent,
               min_risk_reward: settings?.min_risk_reward,
+              quote_mode: quoteMode,
             },
           });
           setActiveRunId(dbRunId);
@@ -284,10 +293,21 @@ export function ScannerPage() {
     } finally {
       if (runId.current === myRun) setLoading(false);
     }
-  }, [universe, timeframe, settings, t, user, sharePublic, reloadHistory]);
+  }, [universe, timeframe, quoteMode, settings, t, user, sharePublic, reloadHistory]);
+
+  const confluence = useMemo(
+    () => computeConfluence(results.map(({ result: r }) => ({ symbol: r.symbol, timeframe: r.timeframe, signalType: r.signalType, score: r.score }))),
+    [results],
+  );
 
   const filtered = useMemo(() => {
     const list = results.filter(({ result: r }) => {
+      if (pairFilter === 'USDT' || pairFilter === 'BTC') {
+        if (quoteOf(r.symbol) !== pairFilter) return false;
+      } else if (pairFilter === 'DUAL') {
+        const c = confluenceFor(confluence, r.symbol, r.timeframe);
+        if (!isDualSignal(c) || !c.aligned) return false;
+      }
       if (minScore > 0 && r.score < minScore) return false;
       if (riskFilter !== 'ALL' && r.riskLevel !== riskFilter) return false;
       if (signalFilter !== 'ALL' && r.signalType !== signalFilter) return false;
@@ -301,7 +321,7 @@ export function ScannerPage() {
         return (b.result.candleCloseTime ?? 0) - (a.result.candleCloseTime ?? 0) || b.result.score - a.result.score;
       return weight(b.result) - weight(a.result) || b.result.score - a.result.score;
     });
-  }, [results, minScore, riskFilter, signalFilter, sort]);
+  }, [results, confluence, pairFilter, minScore, riskFilter, signalFilter, sort]);
 
   return (
     <div className="space-y-4 sm:space-y-6">
@@ -371,6 +391,27 @@ export function ScannerPage() {
           </button>
         </div>
 
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-7 gap-2 sm:gap-3 mt-2 sm:mt-3">
+          <select value={quoteMode} onChange={(e) => setQuoteMode(e.target.value as QuoteMode)} className="input-field text-sm" aria-label={t('quotePair')}>
+            <option value="BOTH">{t('quotePair')}: USDT + BTC</option>
+            <option value="USDT">{t('quotePair')}: USDT</option>
+            <option value="BTC">{t('quotePair')}: BTC</option>
+          </select>
+          <select value={pairFilter} onChange={(e) => setPairFilter(e.target.value as PairFilter)} className="input-field text-sm" aria-label={t('confluence')}>
+            <option value="ALL">{lang === 'fa' ? 'نمایش: همه جفت‌ها' : 'Show: all pairs'}</option>
+            <option value="USDT">{lang === 'fa' ? 'نمایش: فقط USDT' : 'Show: USDT only'}</option>
+            <option value="BTC">{lang === 'fa' ? 'نمایش: فقط BTC' : 'Show: BTC only'}</option>
+            <option value="DUAL">{lang === 'fa' ? 'نمایش: سیگنال هم‌زمان USDT و BTC' : 'Show: USDT + BTC aligned'}</option>
+          </select>
+        </div>
+        {btcMissing && (
+          <p className="text-[11px] text-warning-400 mt-2 leading-5">
+            {lang === 'fa'
+              ? 'فهرست جفت‌های BTC دریافت نشد، پس فقط USDT اسکن شد. تابع market-data را دوباره deploy کنید.'
+              : 'The BTC pair list was not available, so only USDT was scanned. Redeploy the market-data function.'}
+          </p>
+        )}
+
         {user ? (
           <label className="mt-3 flex items-center gap-2 text-xs text-slate-400 cursor-pointer select-none">
             <input type="checkbox" checked={sharePublic} onChange={(e) => setSharePublic(e.target.checked)} />
@@ -422,12 +463,16 @@ export function ScannerPage() {
                 <div className="flex items-start justify-between gap-2">
                   <div className="min-w-0">
                     <div className="flex items-center gap-2">
-                      <span className="text-base font-bold text-slate-100">{r.symbol.replace(/USDT$/i, '')}</span>
+                      <PairLabel symbol={r.symbol} className="text-base font-bold text-slate-100" />
                       <Chip>{timeframe}</Chip>
                       <span className="text-xs text-slate-500">#{rank}</span>
                     </div>
-                    <div className="mt-1.5">
-                      <SignalBadge type={r.signalType} />
+                    <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                      <SignalBadge type={r.signalType} quote={quoteOf(r.symbol)} />
+                      {(() => {
+                        const c = confluenceFor(confluence, r.symbol, r.timeframe);
+                        return isDualSignal(c) ? <ConfluenceBadge c={c} showLegs /> : null;
+                      })()}
                     </div>
                   </div>
                   <div className="text-end shrink-0">
@@ -478,9 +523,15 @@ export function ScannerPage() {
                       onClick={() => navigate(`/asset/${r.symbol}?tf=${timeframe}`)}
                       className="hover:bg-surface-100 transition-colors cursor-pointer"
                     >
-                      <td className="px-3 py-3 font-semibold text-slate-100">{r.symbol.replace(/USDT$/i, '')}</td>
+                      <td className="px-3 py-3 font-semibold text-slate-100"><PairLabel symbol={r.symbol} /></td>
                       <td className="px-3 py-3">
-                        <SignalBadge type={r.signalType} />
+                        <div className="flex flex-col items-start gap-1">
+                          <SignalBadge type={r.signalType} quote={quoteOf(r.symbol)} />
+                          {(() => {
+                            const c = confluenceFor(confluence, r.symbol, r.timeframe);
+                            return isDualSignal(c) ? <ConfluenceBadge c={c} showLegs /> : null;
+                          })()}
+                        </div>
                       </td>
                       <td className="px-3 py-3">
                         <ScoreBar score={r.score} />
