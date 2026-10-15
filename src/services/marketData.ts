@@ -1,5 +1,8 @@
 import type { Candle, Timeframe, SymbolInfo, TickerStat, CoinMarketData, ProviderStatus } from '@/types/market';
 import { validateCandles, type DataValidationResult } from '@/engine/dataValidation';
+import { pickScanTargets, type QuoteMode, type ScanTarget } from '@/engine/scanTargets';
+
+export type { QuoteMode, ScanTarget };
 import { supabase } from './supabaseClient';
 
 const isDev = import.meta.env.DEV;
@@ -52,6 +55,7 @@ function parseKlines(rows: unknown[][]): Candle[] {
     close: Number(row[4]),
     volume: Number(row[5]),
     closeTime: row[6] as number,
+    takerBuyVolume: row[9] === undefined ? undefined : Number(row[9]),
   }));
 }
 
@@ -82,18 +86,32 @@ export async function fetchTickers(symbols: string[]): Promise<TickerStat[]> {
 
 let exchangeInfoCache: { at: number; list: SymbolInfo[] } | null = null;
 
-/** Tradable Binance spot USDT pairs (cached for 1 hour in memory). */
+const SCAN_QUOTES = new Set<string>(['USDT', 'BTC']);
+
+function toPairs(raw: Record<string, unknown>[]): SymbolInfo[] {
+  return raw
+    .filter((s) => s.status === 'TRADING' && SCAN_QUOTES.has(String(s.quoteAsset)) && s.isSpotTradingAllowed)
+    .map((s) => ({ symbol: String(s.symbol), baseAsset: String(s.baseAsset), quoteAsset: String(s.quoteAsset) }));
+}
+
+/** Tradable Binance spot pairs quoted in USDT or BTC (cached for 1 hour in memory). */
 export async function fetchExchangeInfo(): Promise<SymbolInfo[]> {
   if (exchangeInfoCache && Date.now() - exchangeInfoCache.at < 3_600_000) return exchangeInfoCache.list;
   let list: SymbolInfo[] | null = null;
   const proxied = await viaProxy<{ symbols: SymbolInfo[] }>('exchange-info');
   if (proxied?.symbols?.length) list = proxied.symbols;
-  if (!list) {
-    const data = await fetchJson<{ symbols: Record<string, unknown>[] }>(`${BINANCE_BASE}/api/v3/exchangeInfo`);
-    list = data.symbols
-      .filter((s) => s.status === 'TRADING' && s.quoteAsset === 'USDT' && s.isSpotTradingAllowed)
-      .map((s) => ({ symbol: String(s.symbol), baseAsset: String(s.baseAsset), quoteAsset: String(s.quoteAsset) }));
+
+  // An older `market-data` function only lists USDT pairs. Try to complete the list directly; if Binance is
+  // not reachable from this network the scan simply stays USDT-only (the UI says so).
+  if (!list || !list.some((s) => s.quoteAsset === 'BTC')) {
+    try {
+      const data = await fetchJson<{ symbols: Record<string, unknown>[] }>(`${BINANCE_BASE}/api/v3/exchangeInfo`);
+      list = toPairs(data.symbols);
+    } catch {
+      /* keep whatever the proxy returned */
+    }
   }
+  if (!list) throw new Error('Could not load the Binance pair list');
   exchangeInfoCache = { at: Date.now(), list };
   return list;
 }
@@ -121,29 +139,14 @@ export async function fetchProviderStatus(): Promise<ProviderStatus> {
   };
 }
 
-/**
- * Same exclusions as the server-side scan: stablecoins and wrapped/staked tokens are not tradable signals.
- */
-export const EXCLUDED_BASES = new Set([
-  'USDT', 'USDC', 'FDUSD', 'TUSD', 'USDP', 'DAI', 'BUSD', 'USDE', 'USDS', 'PYUSD', 'USD1', 'USDD', 'GUSD',
-  'FRAX', 'LUSD', 'EURC', 'EURI', 'AEUR', 'XUSD', 'RLUSD', 'BFUSD', 'USDG', 'USDY', 'SUSDE', 'USDT0', 'USTB',
-  'WBTC', 'WETH', 'STETH', 'WSTETH', 'WEETH', 'WBETH', 'BETH', 'CBBTC', 'CBETH', 'RETH', 'METH', 'EZETH',
-  'RSETH', 'BNSOL', 'JITOSOL', 'MSOL', 'WBNB', 'BTCB', 'PAXG', 'XAUT',
-]);
-
-/** Top-N coins by market cap that really trade as <COIN>USDT on Binance spot (stablecoins removed). */
-export async function fetchScanUniverse(count: number): Promise<{ symbol: string; base: string; rank: number }[]> {
+/** Top-N coins by market cap, as scan targets in the requested quote currency(ies). */
+export async function fetchScanUniverse(
+  count: number,
+  mode: QuoteMode = 'USDT',
+): Promise<{ targets: ScanTarget[]; btcListed: boolean }> {
   const [markets, pairs] = await Promise.all([fetchCoinGeckoMarkets(Math.min(250, count * 2 + 20), 1), fetchExchangeInfo()]);
-  const tradable = new Set(pairs.map((p) => p.symbol));
-  const out: { symbol: string; base: string; rank: number }[] = [];
-  const seen = new Set<string>();
-  for (const m of markets) {
-    const base = m.symbol.toUpperCase();
-    const symbol = `${base}USDT`;
-    if (EXCLUDED_BASES.has(base) || seen.has(symbol) || !tradable.has(symbol)) continue;
-    seen.add(symbol);
-    out.push({ symbol, base, rank: m.market_cap_rank });
-    if (out.length >= count) break;
-  }
-  return out;
+  return {
+    targets: pickScanTargets(markets, pairs, count, mode),
+    btcListed: pairs.some((p) => p.quoteAsset === 'BTC'),
+  };
 }
