@@ -1,3 +1,5 @@
+import { QuoteChip } from '@/components/Quote';
+import { quoteOf } from '@engine';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { TestTubes, RefreshCw } from 'lucide-react';
@@ -200,6 +202,7 @@ export function SignalLabPage() {
                       <div className="min-w-0">
                         <div className="flex items-center gap-2 flex-wrap">
                           <span className="text-base font-bold text-slate-100">{r.base_asset}</span>
+                          <QuoteChip quote={quoteOf(r.symbol)} />
                           <Chip>{r.timeframe}</Chip>
                           {r.source === 'manual_track' && <Chip tone="bg-primary-500/20 text-primary-300">{t('slManualBadge')}</Chip>}
                         </div>
@@ -242,7 +245,7 @@ export function SignalLabPage() {
                       {filtered.map((r) => (
                         <tr key={r.id} className="hover:bg-surface-100 cursor-pointer" onClick={() => open(r)}>
                           <td className="px-3 py-3 font-semibold text-slate-100 whitespace-nowrap">
-                            {r.base_asset}
+                            {r.base_asset} <QuoteChip quote={quoteOf(r.symbol)} />
                             {r.source === 'manual_track' && <span className="ms-2 align-middle"><Chip tone="bg-primary-500/20 text-primary-300">{t('slManualBadge')}</Chip></span>}
                           </td>
                           <td className="px-3 py-3 text-slate-300 uppercase">{r.timeframe}</td>
