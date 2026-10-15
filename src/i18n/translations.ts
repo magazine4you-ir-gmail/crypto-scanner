@@ -273,6 +273,12 @@ export const translations: Translations = {
 
   // Signal Lab
   signalLab: { fa: 'آزمایشگاه سیگنال', en: 'Signal Lab' },
+  scalp: { fa: 'فست اسکالپ', en: 'Fast Scalp' },
+  sellToBtc: { fa: 'فروش به BTC', en: 'Sell → BTC' },
+  quotePair: { fa: 'جفت‌ارز', en: 'Quote' },
+  quoteBoth: { fa: 'USDT + BTC', en: 'USDT + BTC' },
+  confluence: { fa: 'هم‌پوشانی USDT و BTC', en: 'USDT + BTC confluence' },
+  btcRotation: { fa: 'چرخش به BTC', en: 'Rotate to BTC' },
   slDescription: {
     fa: 'هر سیگنال BUY/SELL اسکن خودکار فقط یک‌بار ثبت می‌شود و روی سرور با کندل‌های بسته‌شده ارزیابی می‌گردد (برد / باخت / منقضی). کارمزد و اسلیپیج (حدود ۰٫۲۵٪ رفت‌وبرگشت) کسر شده است.',
     en: 'Each auto-scan BUY/SELL signal is recorded once and resolved on the server from CLOSED candles (win / loss / expired). Fees and slippage (~0.25% round trip) are deducted.',
