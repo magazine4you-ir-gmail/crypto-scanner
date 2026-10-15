@@ -4,6 +4,7 @@ import type { UserSettings } from '@/services/settingsService';
 import {
   analyzeCore,
   closedCandles,
+  priceDecimals,
   DEFAULT_WEIGHTS,
   DEFAULT_THRESHOLDS,
   DEFAULT_RISK_CONFIG,
@@ -176,10 +177,10 @@ function buildExplanation(lang: 'fa' | 'en', s: ExplainInput): string {
   if (reason.length > 0) lines.push(`${fa ? 'توضیح' : 'Note'}: ${reason.join(fa ? '، ' : ', ')}`);
   if (s.risk) {
     const r = s.risk;
-    lines.push(`${fa ? 'محدوده ورود' : 'Entry Zone'}: ${r.entryLow.toFixed(4)} - ${r.entryHigh.toFixed(4)}`);
-    lines.push(`${fa ? 'ابطال' : 'Invalidation'}: ${r.invalidation.toFixed(4)}`);
-    lines.push(`${fa ? 'هدف ۱' : 'Target 1'}: ${r.target1.toFixed(4)}`);
-    lines.push(`${fa ? 'هدف ۲' : 'Target 2'}: ${r.target2.toFixed(4)}`);
+    lines.push(`${fa ? 'محدوده ورود' : 'Entry Zone'}: ${r.entryLow.toFixed(priceDecimals(r.entryLow))} - ${r.entryHigh.toFixed(priceDecimals(r.entryHigh))}`);
+    lines.push(`${fa ? 'ابطال' : 'Invalidation'}: ${r.invalidation.toFixed(priceDecimals(r.invalidation))}`);
+    lines.push(`${fa ? 'هدف ۱' : 'Target 1'}: ${r.target1.toFixed(priceDecimals(r.target1))}`);
+    lines.push(`${fa ? 'هدف ۲' : 'Target 2'}: ${r.target2.toFixed(priceDecimals(r.target2))}`);
     lines.push(`${fa ? 'نسبت ریسک به بازده' : 'Risk/Reward'}: 1:${r.riskReward.toFixed(1)}`);
   }
   return lines.join('\n');
