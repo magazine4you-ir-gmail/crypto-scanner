@@ -30,6 +30,23 @@ Because both sides use the same file, the manual scanner, the auto scan and the 
 * Signal Lab statistics have a source filter (auto scan / manual tracking / all) and are never mixed by default.
 * Dashboard users without the CLI: `npm run bundle:functions` builds single-file versions in `supabase/single-file/` to paste into the dashboard editor.
 
+### BTC pairs and USDT + BTC confluence
+Every scanner works on **USDT pairs (ETHUSDT) and BTC pairs (ETHBTC)** with the same engine, scoring and risk plan. A BTC pair is simply a price series measured in bitcoin (the engine is scale-free, covered by a test at 1e-6 price scale).
+* **Manual scan** (`/scanner`): choose *USDT + BTC*, *USDT* or *BTC*; pair filter includes *USDT + BTC aligned*.
+* **Auto scan** (`scheduled-scan`): USDT pairs for the top 100 coins + BTC pairs for the top 50 coins (`BTC_TOP_N`). BTC-pair liquidity is converted to USD before the filter (floor $300k vs $2M for USDT pairs). No new tables or columns: rows are keyed by `symbol`, the quote is derived from it.
+* **Confluence** (`src/engine/confluence.ts`): per coin and timeframe the two legs are combined: `BUY+BUY` strong buy (rising in dollars *and* beating bitcoin), `SELL+SELL` strong sell, `BUY(USDT)+SELL(BTC)` lagging buy (up only because BTC lifts the market), `SELL(USDT)+BUY(BTC)` relative strength, otherwise USDT-only / BTC-only. Shown as a badge in the manual scanner, the auto scan (own tab) and the asset page.
+* **SELL on a BTC pair is not a short**: it means "sell the coin for BTC" (rotation) and is labelled that way; the *no futures* flag only applies to USDT pairs.
+* Signal Lab / `track-signal` accept BTC pairs; their P/L is measured in BTC. Prices below 0.001 are shown with 8 decimals.
+
+### Fast Scalp (`/scalp`)
+Separate strategy module `supabase/functions/_shared/scalp.ts` (alias `@scalp`, dependency-free like the engine). Short timeframes only (1m / 5m / 15m), closed candles only.
+* **Volume profile** from the candles (POC, value area VAH/VAL, HVN/LVN) · **smart-money**: liquidity sweep, MSS, FVG, order block · **price action** trigger: engulfing / pin bar / momentum · relative-volume confirmation and optional taker-buy delta · higher-timeframe bias filter (1m→15m, 5m→1h, 15m→4h).
+* Two models: `REVERSAL` (sweep + reclaim) and `CONTINUATION` (trend pullback into FVG/OB/volume node). BUY/SELL needs every gate; a setup that only lacks the trigger candle or score is `WAIT`.
+* **No greed**: one target (default 1.5R), clipped in front of the first wall (POC/HVN/swing), time stop after 10–15 bars. **Controlled risk**: structural stop beyond the raid wick, stop-size limits, risk % sizing capped at capital (no leverage), net R/R after fees, daily-loss cap and cooldown in the backtest.
+* **Fees are part of the strategy**: default 0.10 % round trip. When fees would eat more than 30 % of 1R the trade is rejected (`COST_TOO_HIGH`). On 1m the ATR is often smaller than the fee, so expect few or no signals there: that is the filter working.
+* The backtest page section reports *why* setups were rejected. Random-walk sanity check (no edge exists): ~50 % win rate and ~0R expectancy without fees, i.e. no look-ahead.
+* Not covered: real order-book / footprint data (candles only), server-side scalp scanning, live execution.
+
 ### Signal Lab (paper trading)
 * Registered **once per signal** (first scan where the type flips to BUY/SELL) — unique index per signal candle.
 * Resolved **on the server** from closed candles after the signal candle: stop is checked before target in the same bar, gaps exit at the open, 0.25 % round-trip cost is deducted, expiry after N bars.
