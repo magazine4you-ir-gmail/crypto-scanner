@@ -1,17 +1,20 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Timer, RefreshCw, Search, TrendingUp, TrendingDown, Clock, AlertTriangle } from 'lucide-react';
-import { timeframeMs } from '@engine';
+import { timeframeMs, quoteOf } from '@engine';
 import { useSettings } from '@/contexts/SettingsContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { Card, ErrorState, EmptyState, LoadingSpinner, Disclaimer } from '@/components/UI';
 import { ScoreBar, TrendBadge, RegimeBadge, SignalBadge } from '@/components/Badges';
 import { Metric, TimeStamp, Chip, Pill, PillRow } from '@/components/Responsive';
+import { QuoteChip, ConfluenceBadge } from '@/components/Quote';
+import { computeConfluence, confluenceFor, isDualSignal, type Confluence } from '@/engine/confluence';
 import { formatPrice, formatNumber, formatDate, timeAgo } from '@/i18n/format';
 import type { TrendDirection, MarketRegime } from '@/types/signal';
 import { fetchScanResults, fetchLatestScanRun, type ScanResultRow, type ScanRunRow } from '@/services/scanService';
 
-type Tab = 'ACTION' | 'BUY' | 'SELL' | 'WAIT' | 'ALL';
+type Tab = 'ACTION' | 'DUAL' | 'BUY' | 'SELL' | 'WAIT' | 'ALL';
+type Pair = 'ALL' | 'USDT' | 'BTC';
 type Sort = 'newest' | 'score' | 'rank';
 
 const REFRESH_MS = 60_000;
@@ -40,6 +43,7 @@ export function AutoScanPage() {
   const [timeframe, setTimeframe] = useState<string>('ALL');
   const [sort, setSort] = useState<Sort>('newest');
   const [query, setQuery] = useState('');
+  const [pair, setPair] = useState<Pair>('ALL');
 
   const load = useCallback(async () => {
     try {
@@ -70,7 +74,16 @@ export function AutoScanPage() {
     [results],
   );
 
-  const inTimeframe = useMemo(() => results.filter((r) => timeframe === 'ALL' || r.timeframe === timeframe), [results, timeframe]);
+  // confluence always looks at BOTH quotes of a coin, whatever pair filter is active
+  const confluence = useMemo(
+    () => computeConfluence(results.map((r) => ({ symbol: r.symbol, timeframe: r.timeframe, signalType: r.signal_type, score: r.score }))),
+    [results],
+  );
+
+  const inTimeframe = useMemo(
+    () => results.filter((r) => (timeframe === 'ALL' || r.timeframe === timeframe) && (pair === 'ALL' || quoteOf(r.symbol) === pair)),
+    [results, timeframe, pair],
+  );
 
   const counts = useMemo(
     () => ({
@@ -85,6 +98,10 @@ export function AutoScanPage() {
     const q = query.trim().toUpperCase();
     const list = inTimeframe.filter((r) => {
       if (tab === 'ACTION' && r.signal_type !== 'BUY' && r.signal_type !== 'SELL') return false;
+      if (tab === 'DUAL') {
+        const c = confluenceFor(confluence, r.symbol, r.timeframe);
+        if (!isDualSignal(c) || !c.aligned) return false;
+      }
       if ((tab === 'BUY' || tab === 'SELL' || tab === 'WAIT') && r.signal_type !== tab) return false;
       if (q && !r.base_asset.toUpperCase().includes(q)) return false;
       return true;
@@ -95,7 +112,7 @@ export function AutoScanPage() {
       if (sort === 'rank') return (a.market_rank ?? 999) - (b.market_rank ?? 999) || TF_ORDER.indexOf(a.timeframe) - TF_ORDER.indexOf(b.timeframe);
       return bySince(a, b) || b.score - a.score;
     });
-  }, [inTimeframe, tab, query, sort]);
+  }, [inTimeframe, confluence, tab, query, sort]);
 
   const lastTime = run?.finished_at ?? run?.started_at ?? null;
   const stale =
@@ -115,6 +132,7 @@ export function AutoScanPage() {
 
   const tabs: { key: Tab; label: string }[] = [
     { key: 'ACTION', label: t('asBuyAndShort') },
+    { key: 'DUAL', label: lang === 'fa' ? 'هم‌پوشانی USDT+BTC' : 'USDT+BTC confluence' },
     { key: 'BUY', label: t('buy') },
     { key: 'SELL', label: t('asShort') },
     { key: 'WAIT', label: t('wait') },
@@ -178,6 +196,13 @@ export function AutoScanPage() {
                 <Pill key={x.key} active={tab === x.key} onClick={() => setTab(x.key)}>{x.label}</Pill>
               ))}
             </PillRow>
+            <PillRow>
+              {(['ALL', 'USDT', 'BTC'] as Pair[]).map((p) => (
+                <Pill key={p} active={pair === p} onClick={() => setPair(p)}>
+                  {p === 'ALL' ? (lang === 'fa' ? 'همه جفت‌ها' : 'All pairs') : p}
+                </Pill>
+              ))}
+            </PillRow>
             <div className="grid grid-cols-2 sm:flex sm:flex-wrap gap-2 sm:items-center">
               <select value={sort} onChange={(e) => setSort(e.target.value as Sort)} className="input-field text-sm sm:!w-auto" aria-label={t('sortBy')}>
                 <option value="newest">{t('sortBy')}: {t('sortNewest')}</option>
@@ -208,7 +233,7 @@ export function AutoScanPage() {
               {/* ---------- phones & small tablets: cards ---------- */}
               <div className="md:hidden space-y-2.5">
                 {rows.map((r) => (
-                  <ScanCard key={`${r.symbol}-${r.timeframe}`} r={r} onOpen={() => navigate(`/asset/${r.symbol}?tf=${r.timeframe}`)} />
+                  <ScanCard key={`${r.symbol}-${r.timeframe}`} r={r} c={confluenceFor(confluence, r.symbol, r.timeframe)} onOpen={() => navigate(`/asset/${r.symbol}?tf=${r.timeframe}`)} />
                 ))}
               </div>
 
@@ -232,19 +257,24 @@ export function AutoScanPage() {
                         >
                           <td className="px-3 py-3 whitespace-nowrap">
                             <span className="font-semibold text-slate-100">{r.base_asset}</span>
+                            <span className="ms-1.5"><QuoteChip quote={quoteOf(r.symbol)} /></span>
                             {r.market_rank !== null && <span className="text-xs text-slate-500 ms-2">#{r.market_rank}</span>}
                           </td>
                           <td className="px-3 py-3 text-slate-300 uppercase">{r.timeframe}</td>
                           <td className="px-3 py-3">
                             <div className="flex items-center gap-2 flex-wrap">
-                              <SignalBadge type={r.signal_type} />
+                              <SignalBadge type={r.signal_type} quote={quoteOf(r.symbol)} />
                               {r.signal_type === 'WAIT' && r.bias && (
                                 <span className={`text-xs ${r.bias === 'LONG' ? 'text-success-400' : 'text-error-400'}`}>
-                                  {r.bias === 'LONG' ? t('buy') : t('asShort')}
+                                  {r.bias === 'LONG' ? t('buy') : quoteOf(r.symbol) === 'BTC' ? t('sellToBtc') : t('asShort')}
                                 </span>
                               )}
                               {isFresh(r) && <Chip tone="bg-primary-500/20 text-primary-300">{t('newBadge')}</Chip>}
-                              {r.signal_type === 'SELL' && r.shortable === false && <Chip tone="bg-warning-500/20 text-warning-400">{t('noFutures')}</Chip>}
+                              {r.signal_type === 'SELL' && quoteOf(r.symbol) === 'USDT' && r.shortable === false && <Chip tone="bg-warning-500/20 text-warning-400">{t('noFutures')}</Chip>}
+                              {(() => {
+                                const c = confluenceFor(confluence, r.symbol, r.timeframe);
+                                return isDualSignal(c) ? <ConfluenceBadge c={c} showLegs /> : null;
+                              })()}
                             </div>
                           </td>
                           <td className="px-3 py-3"><ScoreBar score={r.score} /></td>
@@ -277,7 +307,7 @@ export function AutoScanPage() {
   );
 }
 
-function ScanCard({ r, onOpen }: { r: ScanResultRow; onOpen: () => void }) {
+function ScanCard({ r, c, onOpen }: { r: ScanResultRow; c: Confluence | null; onOpen: () => void }) {
   const { t, lang } = useSettings();
   const actionable = r.signal_type === 'BUY' || r.signal_type === 'SELL';
   const showPlan = actionable || r.signal_type === 'WAIT';
@@ -290,16 +320,18 @@ function ScanCard({ r, onOpen }: { r: ScanResultRow; onOpen: () => void }) {
         <div className="min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
             <span className="text-base font-bold text-slate-100">{r.base_asset}</span>
+            <QuoteChip quote={quoteOf(r.symbol)} />
             <Chip>{r.timeframe}</Chip>
             {r.market_rank !== null && <span className="text-xs text-slate-500">#{r.market_rank}</span>}
           </div>
           <div className="flex items-center gap-1.5 flex-wrap mt-1.5">
-            <SignalBadge type={r.signal_type} />
+            <SignalBadge type={r.signal_type} quote={quoteOf(r.symbol)} />
             {r.signal_type === 'WAIT' && r.bias && (
-              <span className={`text-xs ${r.bias === 'LONG' ? 'text-success-400' : 'text-error-400'}`}>{r.bias === 'LONG' ? t('buy') : t('asShort')}</span>
+              <span className={`text-xs ${r.bias === 'LONG' ? 'text-success-400' : 'text-error-400'}`}>{r.bias === 'LONG' ? t('buy') : quoteOf(r.symbol) === 'BTC' ? t('sellToBtc') : t('asShort')}</span>
             )}
             {isFresh(r) && <Chip tone="bg-primary-500/20 text-primary-300">{t('newBadge')}</Chip>}
-            {r.signal_type === 'SELL' && r.shortable === false && <Chip tone="bg-warning-500/20 text-warning-400">{t('noFutures')}</Chip>}
+            {r.signal_type === 'SELL' && quoteOf(r.symbol) === 'USDT' && r.shortable === false && <Chip tone="bg-warning-500/20 text-warning-400">{t('noFutures')}</Chip>}
+            {isDualSignal(c) && <ConfluenceBadge c={c} showLegs />}
             {isStaleRow(r) && <Chip tone="bg-surface-300 text-slate-400">{t('staleRow')}</Chip>}
           </div>
         </div>
