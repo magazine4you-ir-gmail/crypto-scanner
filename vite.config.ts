@@ -9,6 +9,7 @@ export default defineConfig({
     alias: {
       '@': fileURLToPath(new URL('./src', import.meta.url)),
       '@engine': fileURLToPath(new URL('./supabase/functions/_shared/engine.ts', import.meta.url)),
+      '@scalp': fileURLToPath(new URL('./supabase/functions/_shared/scalp.ts', import.meta.url)),
     },
   },
   build: {
