@@ -1,11 +1,16 @@
 import { useSettings } from '@/contexts/SettingsContext';
 import type { SignalType, TrendDirection, RiskLevel, MarketRegime, StructureLabel } from '@/types/signal';
+import type { QuoteAsset } from '@engine';
 
-export function SignalBadge({ type }: { type: SignalType }) {
+/**
+ * `quote` matters for SELL: on a USDT pair it is a short; on a BTC pair (ETHBTC) it means the coin is
+ * weakening against bitcoin, i.e. "sell it for BTC", which is possible on spot.
+ */
+export function SignalBadge({ type, quote = 'USDT' }: { type: SignalType; quote?: QuoteAsset }) {
   const { t } = useSettings();
   const labelMap: Record<SignalType, string> = {
     BUY: t('buy'),
-    SELL: t('asShort'),
+    SELL: quote === 'BTC' ? t('sellToBtc') : t('asShort'),
     WAIT: t('wait'),
     EXIT: t('exit'),
     NO_TRADE: t('noTrade'),
