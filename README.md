@@ -73,3 +73,12 @@ Separate strategy module `supabase/functions/_shared/scalp.ts` (alias `@scalp`, 
 * SELL means a **short**. On spot you can only sell what you own; the "No futures" badge appears when the coin has no USDT perpetual on Binance Futures.
 * Prices in Auto Scan are the **close of the last closed candle**, not the live price.
 * Nothing here is financial advice; backtests and paper results do not guarantee future results.
+
+## Signal audit (verify tracking + stop sizes offline)
+
+1. Open **Signal Lab** and press **Audit export** (needs to be signed in). It saves `signal-audit-<date>.json`
+   with every `signal_outcomes` row plus the closed candles around each signal. No database backup needed.
+2. Run `npm run audit -- signal-audit-<date>.json` (add `--all-sources` to include manual tracking).
+3. Read `audit-report.md` (and `audit-report.csv` for per-signal rows):
+   - **A)** re-runs the server logic on real candles: is every stored result correct?
+   - **B)** what-if stops/targets, mirror test and a time-matched random baseline: stop too small, or no edge?
