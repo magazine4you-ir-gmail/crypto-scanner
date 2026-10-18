@@ -3,6 +3,7 @@ import { quoteOf } from '@engine';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { TestTubes, RefreshCw } from 'lucide-react';
+import { AuditExportButton } from '@/components/AuditExportButton';
 import { useSettings } from '@/contexts/SettingsContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { Card, SectionTitle, LoadingSpinner, ErrorState, EmptyState, Disclaimer } from '@/components/UI';
@@ -95,10 +96,13 @@ export function SignalLabPage() {
     <div className="space-y-4 sm:space-y-6">
       <div className="flex items-center justify-between gap-3">
         <Header />
-        <button onClick={() => void load()} className="btn-secondary text-sm inline-flex items-center gap-2 shrink-0" aria-label={t('asRefresh')}>
-          <RefreshCw className="w-4 h-4" />
-          <span className="hidden sm:inline">{t('asRefresh')}</span>
-        </button>
+        <div className="flex items-start gap-2 shrink-0">
+          <AuditExportButton />
+          <button onClick={() => void load()} className="btn-secondary text-sm inline-flex items-center gap-2 shrink-0" aria-label={t('asRefresh')}>
+            <RefreshCw className="w-4 h-4" />
+            <span className="hidden sm:inline">{t('asRefresh')}</span>
+          </button>
+        </div>
       </div>
 
       <p className="text-sm text-slate-400 leading-6">{t('slDescription')}</p>
