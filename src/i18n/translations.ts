@@ -251,6 +251,14 @@ export const translations: Translations = {
   asLastScan: { fa: 'آخرین اسکن', en: 'Last scan' },
   asCoins: { fa: 'ارز', en: 'coins' },
   asRefresh: { fa: 'بازخوانی', en: 'Refresh' },
+  slAuditExport: { fa: 'خروجی ممیزی', en: 'Audit export' },
+  slAuditBusy: { fa: 'در حال دریافت کندل‌ها', en: 'Fetching candles' },
+  slAuditDone: { fa: 'فایل ذخیره شد، تعداد سیگنال', en: 'File saved, signals' },
+  slAuditWarnings: { fa: 'هشدار', en: 'warnings' },
+  slAuditHint: {
+    fa: 'همه سیگنال‌ها و کندل‌های اطرافشان را در یک فایل JSON ذخیره می‌کند تا ردیابی و حد ضرر بررسی شود.',
+    en: 'Saves every signal plus the candles around it to one JSON file so tracking and stop sizes can be re-verified.',
+  },
   asTarget: { fa: 'هدف ۱', en: 'Target 1' },
   asSince: { fa: 'فعال از', en: 'Active since' },
   asNoData: {
