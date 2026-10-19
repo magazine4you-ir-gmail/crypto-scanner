@@ -1,27 +1,32 @@
 // supabase/functions/scheduled-scan/index.ts
 //
-// اسکن خودکار ساعتی ارزهای برتر (Buy / Short / Wait) + ارزیابی نتایج Signal Lab.
+// اسکن خودکار ساعتی ارزهای برتر (Buy / Short / Wait) + ارزیابی نتایج Signal Lab + Reverse Signal Lab.
 // Hourly server-side scan of the top coins, called by pg_cron (see supabase/cron_setup.sql).
 //
 // What one run does:
 //   1. Builds the coin universe (CoinGecko market cap ∩ Binance spot, min liquidity):
-//        - USDT pairs for the top TOP_N coins (ETHUSDT, SOLUSDT, ...)
-//        - BTC pairs for the top BTC_TOP_N coins (ETHBTC, SOLBTC, ...): same engine, prices measured in BTC.
+//        - USDT pairs for the top TOP_N coins
+//        - BTC pairs for the top BTC_TOP_N coins
 //   2. Scans only the (coin, timeframe) pairs whose candle closed since their last scan.
 //   3. Upserts the latest result per (symbol, timeframe) into `scan_results`.
 //   4. Signal Lab (paper trading):
 //        a. resolves OPEN outcomes (WIN / LOSS / EXPIRED) from CLOSED candles, after fees,
 //        b. registers NEW BUY/SELL signals exactly once per signal candle.
+//   4b. Reverse Signal Lab:
+//        a. backfills missing reverse_signal_outcomes rows for existing signal_outcomes,
+//        b. mirrors CANCELLED origin rows onto reverse rows,
+//        c. resolves OPEN reverse rows with the same resolveTrade engine.
 //   5. Housekeeping.
 //
-// Auth: header  x-cron-secret: <CRON_SECRET>   (deploy with --no-verify-jwt, see config.toml)
+// Auth: header  x-cron-secret: <CRON_SECRET>   (deploy with --no-verify-jwt)
 // Optional query:  ?force=1  (rescan everything)   ?tf=1h,4h  (limit timeframes)
-// Secrets: CRON_SECRET (required), COINGECKO_API_KEY (optional demo key)
+// Secrets: CRON_SECRET (required), COINGECKO_API_KEY (optional)
 
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "npm:@supabase/supabase-js@2.57.4";
 import {
   analyzeCore,
+  buildReverseOutcomeRow,
   closedCandles,
   EXPIRY_BARS,
   lastBoundary,
@@ -38,13 +43,13 @@ import {
 // ---------------------------------------------------------------------
 const TIMEFRAMES = ["1h", "4h", "1d"];
 const TOP_N = 100;
-const BTC_TOP_N = 50; // BTC pairs are scanned for the top coins only (keeps Binance request weight in check)
+const BTC_TOP_N = 50;
 const CANDLE_LIMIT = 300;
 const CONCURRENCY = 8;
-const SCAN_BUDGET_MS = 85_000; // stop starting scan work after this
-const EVAL_BUDGET_MS = 125_000; // stop evaluating outcomes after this (wall-clock limit ~150s)
-const MIN_QUOTE_VOLUME = 2_000_000; // USD, 24h — filters illiquid / ticker-collision coins (USDT pairs)
-const MIN_BTC_PAIR_VOLUME_USD = 300_000; // BTC pairs trade ~10x thinner; volume is converted to USD before comparing
+const SCAN_BUDGET_MS = 85_000;
+const EVAL_BUDGET_MS = 125_000;
+const MIN_QUOTE_VOLUME = 2_000_000;
+const MIN_BTC_PAIR_VOLUME_USD = 300_000;
 const KEEP_RUNS_DAYS = 14;
 const KEEP_SIGNALS_DAYS = 30;
 const STALE_ROW_DAYS = 3;
@@ -104,8 +109,12 @@ function parseKlines(rows: unknown[][]): Candle[] {
     .filter((c) => Number.isFinite(c.close) && Number.isFinite(c.high) && Number.isFinite(c.low));
 }
 
-/** Runs `worker` over items with limited concurrency; stops starting new items after `deadline`. */
-async function mapPool<T>(items: T[], size: number, worker: (item: T) => Promise<void>, deadline: number): Promise<number> {
+async function mapPool<T>(
+  items: T[],
+  size: number,
+  worker: (item: T) => Promise<void>,
+  deadline: number,
+): Promise<number> {
   let next = 0;
   let skipped = 0;
   const runners = Array.from({ length: size }, async () => {
@@ -123,7 +132,8 @@ async function mapPool<T>(items: T[], size: number, worker: (item: T) => Promise
   return skipped;
 }
 
-const num = (v: number | null | undefined): number | null => (v !== null && v !== undefined && Number.isFinite(v) ? v : null);
+const num = (v: number | null | undefined): number | null =>
+  v !== null && v !== undefined && Number.isFinite(v) ? v : null;
 
 function safeEqual(a: string, b: string): boolean {
   if (a.length !== b.length) return false;
@@ -133,7 +143,10 @@ function safeEqual(a: string, b: string): boolean {
 }
 
 function json(body: unknown, status = 200): Response {
-  return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json; charset=utf-8" } });
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { "Content-Type": "application/json; charset=utf-8" },
+  });
 }
 
 // ---------------------------------------------------------------------
@@ -147,9 +160,10 @@ interface Coin {
   rank: number;
 }
 
-/** Tradable spot pairs quoted in USDT or BTC: symbol -> { base, quote }. */
 async function getTradablePairs(): Promise<Map<string, { base: string; quote: QuoteAsset }>> {
-  const data = (await fetchJson(`${BINANCE_BASE}/api/v3/exchangeInfo`)) as { symbols?: Record<string, unknown>[] };
+  const data = (await fetchJson(`${BINANCE_BASE}/api/v3/exchangeInfo`)) as {
+    symbols?: Record<string, unknown>[];
+  };
   const map = new Map<string, { base: string; quote: QuoteAsset }>();
   for (const s of data.symbols ?? []) {
     const quote = String(s.quoteAsset);
@@ -160,16 +174,22 @@ async function getTradablePairs(): Promise<Map<string, { base: string; quote: Qu
   return map;
 }
 
-/** 24h quote volume in USD for every symbol (BTC-pair volume is converted with the BTCUSDT price). */
 async function getUsdVolumes(): Promise<Map<string, number> | null> {
   try {
-    const tickers = (await fetchJson(`${BINANCE_BASE}/api/v3/ticker/24hr`)) as { symbol: string; quoteVolume: string; lastPrice: string }[];
+    const tickers = (await fetchJson(`${BINANCE_BASE}/api/v3/ticker/24hr`)) as {
+      symbol: string;
+      quoteVolume: string;
+      lastPrice: string;
+    }[];
     const btcUsd = Number(tickers.find((t) => t.symbol === "BTCUSDT")?.lastPrice ?? 0);
     const out = new Map<string, number>();
     for (const t of tickers) {
       const v = Number(t.quoteVolume);
-      if (quoteOf(t.symbol) === "BTC" && t.symbol.endsWith("BTC")) out.set(t.symbol, btcUsd > 0 ? v * btcUsd : 0);
-      else out.set(t.symbol, v);
+      if (quoteOf(t.symbol) === "BTC" && t.symbol.endsWith("BTC")) {
+        out.set(t.symbol, btcUsd > 0 ? v * btcUsd : 0);
+      } else {
+        out.set(t.symbol, v);
+      }
     }
     return out;
   } catch {
@@ -179,7 +199,8 @@ async function getUsdVolumes(): Promise<Map<string, number> | null> {
 
 async function buildUniverse(n: number): Promise<{ coins: Coin[]; source: string }> {
   const [tradable, volumes] = await Promise.all([getTradablePairs(), getUsdVolumes()]);
-  const minVolume = (symbol: string) => (tradable.get(symbol)?.quote === "BTC" ? MIN_BTC_PAIR_VOLUME_USD : MIN_QUOTE_VOLUME);
+  const minVolume = (symbol: string) =>
+    tradable.get(symbol)?.quote === "BTC" ? MIN_BTC_PAIR_VOLUME_USD : MIN_QUOTE_VOLUME;
   const liquid = (symbol: string) => volumes === null || (volumes.get(symbol) ?? 0) >= minVolume(symbol);
 
   try {
@@ -205,7 +226,6 @@ async function buildUniverse(n: number): Promise<{ coins: Coin[]; source: string
         seen.add(usdt);
         usdtCoins.push({ symbol: usdt, base, quote: "USDT", name: c.name, rank });
       }
-      // BTC pairs: top BTC_TOP_N by market cap. BTC itself has no BTC pair.
       const btc = `${base}BTC`;
       if (base !== "BTC" && btcCoins.length < BTC_TOP_N && !seenBtc.has(btc) && tradable.has(btc) && liquid(btc)) {
         seenBtc.add(btc);
@@ -213,7 +233,9 @@ async function buildUniverse(n: number): Promise<{ coins: Coin[]; source: string
       }
       if (usdtCoins.length >= n && btcCoins.length >= BTC_TOP_N) break;
     }
-    if (usdtCoins.length >= Math.min(n, 50)) return { coins: [...usdtCoins, ...btcCoins], source: "coingecko-marketcap" };
+    if (usdtCoins.length >= Math.min(n, 50)) {
+      return { coins: [...usdtCoins, ...btcCoins], source: "coingecko-marketcap" };
+    }
   } catch {
     // fall through
   }
@@ -224,34 +246,52 @@ async function buildUniverse(n: number): Promise<{ coins: Coin[]; source: string
     [...tickers.entries()]
       .filter(([symbol, vol]) => {
         const t = tradable.get(symbol);
-        return t !== undefined && t.quote === quote && !EXCLUDED_BASES.has(t.base) && !(quote === "BTC" && t.base === "BTC") && vol >= minVolume(symbol);
+        return (
+          t !== undefined &&
+          t.quote === quote &&
+          !EXCLUDED_BASES.has(t.base) &&
+          !(quote === "BTC" && t.base === "BTC") &&
+          vol >= minVolume(symbol)
+        );
       })
       .sort((a, b) => b[1] - a[1])
       .slice(0, limit)
       .map(([symbol]) => symbol);
   const usdtSymbols = rankedBy("USDT", n);
-  // a coin keeps ONE rank across both of its pairs (its USDT volume rank); BTC-only coins rank after them
   const rankOfBase = new Map(usdtSymbols.map((symbol, i) => [tradable.get(symbol)!.base, i + 1]));
   const toCoin = (symbol: string, quote: QuoteAsset, i: number): Coin => {
     const base = tradable.get(symbol)!.base;
-    return { symbol, base, quote, name: base, rank: rankOfBase.get(base) ?? usdtSymbols.length + i + 1 };
+    return {
+      symbol,
+      base,
+      quote,
+      name: base,
+      rank: rankOfBase.get(base) ?? usdtSymbols.length + i + 1,
+    };
   };
   return {
-    coins: [...usdtSymbols.map((x, i) => toCoin(x, "USDT", i)), ...rankedBy("BTC", BTC_TOP_N).map((x, i) => toCoin(x, "BTC", i))],
+    coins: [
+      ...usdtSymbols.map((x, i) => toCoin(x, "USDT", i)),
+      ...rankedBy("BTC", BTC_TOP_N).map((x, i) => toCoin(x, "BTC", i)),
+    ],
     source: "binance-volume",
   };
 }
 
 async function getFuturesPerps(): Promise<Set<string> | null> {
   try {
-    const data = (await fetchJson(`${BINANCE_FUTURES}/fapi/v1/exchangeInfo`, {}, 1)) as { symbols?: Record<string, unknown>[] };
+    const data = (await fetchJson(`${BINANCE_FUTURES}/fapi/v1/exchangeInfo`, {}, 1)) as {
+      symbols?: Record<string, unknown>[];
+    };
     const set = new Set<string>();
     for (const s of data.symbols ?? []) {
-      if (s.contractType === "PERPETUAL" && s.status === "TRADING" && s.quoteAsset === "USDT") set.add(String(s.symbol));
+      if (s.contractType === "PERPETUAL" && s.status === "TRADING" && s.quoteAsset === "USDT") {
+        set.add(String(s.symbol));
+      }
     }
     return set.size > 0 ? set : null;
   } catch {
-    return null; // geo-blocked or unavailable -> unknown
+    return null;
   }
 }
 
@@ -259,12 +299,13 @@ async function getFuturesPerps(): Promise<Set<string> | null> {
 // Scan
 // ---------------------------------------------------------------------
 async function fetchClosedCandles(symbol: string, interval: string): Promise<Candle[]> {
-  const rows = (await fetchJson(`${BINANCE_BASE}/api/v3/klines?symbol=${symbol}&interval=${interval}&limit=${CANDLE_LIMIT}`)) as unknown[][];
+  const rows = (await fetchJson(
+    `${BINANCE_BASE}/api/v3/klines?symbol=${symbol}&interval=${interval}&limit=${CANDLE_LIMIT}`,
+  )) as unknown[][];
   return closedCandles(parseKlines(rows));
 }
 
 // deno-lint-ignore no-explicit-any
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 type SupabaseClient = ReturnType<typeof createClient<any>>;
 
 interface ScanRow extends Record<string, unknown> {
@@ -292,8 +333,10 @@ interface OutcomeRow {
   candle_close_time: string | null;
 }
 
-/** Resolves OPEN outcomes using CLOSED candles that come after the signal candle. */
-async function evaluateOpenOutcomes(supabase: SupabaseClient, t0: number): Promise<{ checked: number; closed: number }> {
+async function evaluateOpenOutcomes(
+  supabase: SupabaseClient,
+  t0: number,
+): Promise<{ checked: number; closed: number }> {
   const { data, error } = await supabase.from("signal_outcomes").select("*").eq("status", "OPEN").limit(1000);
   if (error) throw new Error(`load open outcomes: ${error.message}`);
   const open = (data ?? []) as OutcomeRow[];
@@ -309,54 +352,62 @@ async function evaluateOpenOutcomes(supabase: SupabaseClient, t0: number): Promi
   }
 
   let closed = 0;
-  await mapPool([...groups.entries()], CONCURRENCY, async ([key, outcomes]) => {
-    const [symbol, tf] = key.split("|");
-    try {
-      const start = Math.min(...outcomes.map(baseTs)) + 1;
-      const rows = (await fetchJson(
-        `${BINANCE_BASE}/api/v3/klines?symbol=${symbol}&interval=${tf}&startTime=${start}&limit=1000`,
-      )) as unknown[][];
-      const candles = closedCandles(parseKlines(rows));
-      for (const o of outcomes) {
-        const base = baseTs(o);
-        const after = candles.filter((c) => c.closeTime > base);
-        const res = resolveTrade(
-          {
-            direction: o.signal_type === "BUY" ? "LONG" : "SHORT",
-            entry: Number(o.price_at_signal),
-            stop: Number(o.stop_loss),
-            target: Number(o.target1),
-            maxBars: EXPIRY_BARS[tf] ?? 40,
-          },
-          after,
-        );
-        if (!res) continue;
-        const { error: upErr } = await supabase
-          .from("signal_outcomes")
-          .update({
-            status: res.status,
-            exit_price: res.exitPrice,
-            exit_at: new Date(res.exitTime).toISOString(),
-            pnl_pct: res.pnlPct,
-            pnl_gross_pct: res.grossPnlPct,
-            r_multiple: res.rMultiple,
-            bars_held: res.barsHeld,
-            notes: res.status === "EXPIRED" ? "time expiry" : null,
-          })
-          .eq("id", o.id)
-          .eq("status", "OPEN");
-        if (!upErr) closed++;
+  await mapPool(
+    [...groups.entries()],
+    CONCURRENCY,
+    async ([key, outcomes]) => {
+      const [symbol, tf] = key.split("|");
+      try {
+        const start = Math.min(...outcomes.map(baseTs)) + 1;
+        const rows = (await fetchJson(
+          `${BINANCE_BASE}/api/v3/klines?symbol=${symbol}&interval=${tf}&startTime=${start}&limit=1000`,
+        )) as unknown[][];
+        const candles = closedCandles(parseKlines(rows));
+        for (const o of outcomes) {
+          const base = baseTs(o);
+          const after = candles.filter((c) => c.closeTime > base);
+          const res = resolveTrade(
+            {
+              direction: o.signal_type === "BUY" ? "LONG" : "SHORT",
+              entry: Number(o.price_at_signal),
+              stop: Number(o.stop_loss),
+              target: Number(o.target1),
+              maxBars: EXPIRY_BARS[tf] ?? 40,
+            },
+            after,
+          );
+          if (!res) continue;
+          const { error: upErr } = await supabase
+            .from("signal_outcomes")
+            .update({
+              status: res.status,
+              exit_price: res.exitPrice,
+              exit_at: new Date(res.exitTime).toISOString(),
+              pnl_pct: res.pnlPct,
+              pnl_gross_pct: res.grossPnlPct,
+              r_multiple: res.rMultiple,
+              bars_held: res.barsHeld,
+              notes: res.status === "EXPIRED" ? "time expiry" : null,
+            })
+            .eq("id", o.id)
+            .eq("status", "OPEN");
+          if (!upErr) closed++;
+        }
+      } catch (e) {
+        console.error(`evaluate ${key}:`, e instanceof Error ? e.message : String(e));
       }
-    } catch (e) {
-      console.error(`evaluate ${key}:`, e instanceof Error ? e.message : String(e));
-    }
-  }, t0 + EVAL_BUDGET_MS);
+    },
+    t0 + EVAL_BUDGET_MS,
+  );
 
   return { checked: open.length, closed };
 }
 
-/** Registers a paper trade ONLY when the signal is new (first scan where the type flipped to BUY/SELL). */
-async function registerNewOutcomes(supabase: SupabaseClient, fresh: ScanRow[], nowIso: string): Promise<number> {
+async function registerNewOutcomes(
+  supabase: SupabaseClient,
+  fresh: ScanRow[],
+  nowIso: string,
+): Promise<number> {
   if (fresh.length === 0) return 0;
 
   const { data: openRows } = await supabase
@@ -410,11 +461,181 @@ async function registerNewOutcomes(supabase: SupabaseClient, fresh: ScanRow[], n
     const chunk = toInsert.slice(i, i + 100);
     const { error, count } = await supabase
       .from("signal_outcomes")
-      .upsert(chunk, { onConflict: "symbol,timeframe,signal_type,candle_close_time", ignoreDuplicates: true, count: "exact" });
+      .upsert(chunk, {
+        onConflict: "symbol,timeframe,signal_type,candle_close_time",
+        ignoreDuplicates: true,
+        count: "exact",
+      });
     if (error) console.error("signal_outcomes insert:", error.message);
     else inserted += count ?? chunk.length;
   }
   return inserted;
+}
+
+// ---------------------------------------------------------------------
+// Reverse Signal Lab
+// ---------------------------------------------------------------------
+
+/** Create reverse rows for any signal_outcomes that still lack a mirror. */
+async function backfillReverseOutcomes(supabase: SupabaseClient): Promise<number> {
+  const { data: origins, error } = await supabase
+    .from("signal_outcomes")
+    .select(
+      "id, symbol, base_asset, timeframe, signal_type, score, price_at_signal, entry_low, entry_high, stop_loss, target1, signal_at, candle_close_time, source, tracked_by, status",
+    )
+    .neq("status", "CANCELLED")
+    .order("signal_at", { ascending: false })
+    .limit(800);
+  if (error) {
+    console.error("reverse backfill load:", error.message);
+    return 0;
+  }
+  if (!origins?.length) return 0;
+
+  const ids = origins.map((o) => o.id as string);
+  const { data: existing } = await supabase
+    .from("reverse_signal_outcomes")
+    .select("origin_outcome_id")
+    .in("origin_outcome_id", ids);
+  const have = new Set((existing ?? []).map((r) => r.origin_outcome_id as string));
+
+  const rows: Record<string, unknown>[] = [];
+  for (const o of origins) {
+    if (have.has(o.id as string)) continue;
+    const mirror = buildReverseOutcomeRow({
+      id: o.id as string,
+      symbol: o.symbol as string,
+      base_asset: o.base_asset as string,
+      timeframe: o.timeframe as string,
+      signal_type: o.signal_type as "BUY" | "SELL",
+      score: Number(o.score),
+      price_at_signal: Number(o.price_at_signal),
+      entry_low: o.entry_low != null ? Number(o.entry_low) : null,
+      entry_high: o.entry_high != null ? Number(o.entry_high) : null,
+      stop_loss: Number(o.stop_loss),
+      target1: Number(o.target1),
+      signal_at: o.signal_at as string,
+      candle_close_time: (o.candle_close_time as string) ?? null,
+      source: (o.source as string) ?? "auto_scan",
+      tracked_by: (o.tracked_by as string) ?? null,
+    });
+    if (mirror) rows.push(mirror);
+  }
+  if (!rows.length) return 0;
+
+  let n = 0;
+  for (let i = 0; i < rows.length; i += 100) {
+    const chunk = rows.slice(i, i + 100);
+    const { error: upErr } = await supabase
+      .from("reverse_signal_outcomes")
+      .upsert(chunk, { onConflict: "origin_outcome_id", ignoreDuplicates: true });
+    if (upErr) console.error("reverse backfill upsert:", upErr.message);
+    else n += chunk.length;
+  }
+  return n;
+}
+
+/** If origin was CANCELLED, cancel its reverse mirror too. */
+async function syncReverseCancellations(supabase: SupabaseClient): Promise<number> {
+  const { data: cancelled } = await supabase
+    .from("signal_outcomes")
+    .select("id")
+    .eq("status", "CANCELLED")
+    .order("signal_at", { ascending: false })
+    .limit(500);
+  if (!cancelled?.length) return 0;
+
+  const ids = cancelled.map((c) => c.id as string);
+  const { data: updated, error } = await supabase
+    .from("reverse_signal_outcomes")
+    .update({
+      status: "CANCELLED",
+      notes: "origin cancelled",
+      exit_at: new Date().toISOString(),
+    })
+    .in("origin_outcome_id", ids)
+    .eq("status", "OPEN")
+    .select("id");
+  if (error) {
+    console.error("reverse cancel sync:", error.message);
+    return 0;
+  }
+  return updated?.length ?? 0;
+}
+
+/** Resolve OPEN reverse trades with the same engine as Signal Lab. */
+async function evaluateOpenReverseOutcomes(
+  supabase: SupabaseClient,
+  t0: number,
+): Promise<{ checked: number; closed: number }> {
+  const { data, error } = await supabase
+    .from("reverse_signal_outcomes")
+    .select("id, symbol, timeframe, signal_type, price_at_signal, stop_loss, target1, signal_at, candle_close_time")
+    .eq("status", "OPEN")
+    .limit(1000);
+  if (error) throw new Error(`load open reverse outcomes: ${error.message}`);
+  const open = (data ?? []) as OutcomeRow[];
+  if (open.length === 0) return { checked: 0, closed: 0 };
+
+  const baseTs = (o: OutcomeRow) => Date.parse(o.candle_close_time ?? o.signal_at);
+  const groups = new Map<string, OutcomeRow[]>();
+  for (const o of open) {
+    const key = `${o.symbol}|${o.timeframe}`;
+    const list = groups.get(key);
+    if (list) list.push(o);
+    else groups.set(key, [o]);
+  }
+
+  let closed = 0;
+  await mapPool(
+    [...groups.entries()],
+    CONCURRENCY,
+    async ([key, outcomes]) => {
+      const [symbol, tf] = key.split("|");
+      try {
+        const start = Math.min(...outcomes.map(baseTs)) + 1;
+        const rows = (await fetchJson(
+          `${BINANCE_BASE}/api/v3/klines?symbol=${symbol}&interval=${tf}&startTime=${start}&limit=1000`,
+        )) as unknown[][];
+        const candles = closedCandles(parseKlines(rows));
+        for (const o of outcomes) {
+          const base = baseTs(o);
+          const after = candles.filter((c) => c.closeTime > base);
+          const res = resolveTrade(
+            {
+              direction: o.signal_type === "BUY" ? "LONG" : "SHORT",
+              entry: Number(o.price_at_signal),
+              stop: Number(o.stop_loss),
+              target: Number(o.target1),
+              maxBars: EXPIRY_BARS[tf] ?? 40,
+            },
+            after,
+          );
+          if (!res) continue;
+          const { error: upErr } = await supabase
+            .from("reverse_signal_outcomes")
+            .update({
+              status: res.status,
+              exit_price: res.exitPrice,
+              exit_at: new Date(res.exitTime).toISOString(),
+              pnl_pct: res.pnlPct,
+              pnl_gross_pct: res.grossPnlPct,
+              r_multiple: res.rMultiple,
+              bars_held: res.barsHeld,
+              notes: res.status === "EXPIRED" ? "time expiry" : null,
+            })
+            .eq("id", o.id)
+            .eq("status", "OPEN");
+          if (!upErr) closed++;
+        }
+      } catch (e) {
+        console.error(`evaluate reverse ${key}:`, e instanceof Error ? e.message : String(e));
+      }
+    },
+    t0 + EVAL_BUDGET_MS,
+  );
+
+  return { checked: open.length, closed };
 }
 
 // ---------------------------------------------------------------------
@@ -435,14 +656,12 @@ Deno.serve(async (req: Request) => {
   const t0 = Date.now();
   const nowIso = new Date(t0).toISOString();
 
-  // A run that crashed (wall-clock kill) stays 'running'; free the lock after 10 minutes.
   await supabase
     .from("scan_runs")
     .update({ status: "failed", error: "timed out (no heartbeat)", finished_at: nowIso })
     .eq("status", "running")
     .lt("started_at", new Date(t0 - 10 * 60_000).toISOString());
 
-  // Atomic lock: a unique partial index allows only one 'running' row.
   const { data: run, error: runError } = await supabase
     .from("scan_runs")
     .insert({ status: "running", timeframes })
@@ -460,7 +679,10 @@ Deno.serve(async (req: Request) => {
     if (coins.length === 0) throw new Error("empty universe");
 
     // ---------------- 2. decide what is due ----------------
-    const { data: previous } = await supabase.from("scan_results").select("symbol, timeframe, signal_type, signal_since, scanned_at").limit(5000);
+    const { data: previous } = await supabase
+      .from("scan_results")
+      .select("symbol, timeframe, signal_type, signal_since, scanned_at")
+      .limit(5000);
     const prev = new Map<string, { signal_type: string; signal_since: string; scanned_at: string }>();
     for (const p of previous ?? []) prev.set(`${p.symbol}|${p.timeframe}`, p);
 
@@ -471,7 +693,6 @@ Deno.serve(async (req: Request) => {
         .filter(({ coin, tf: f }) => {
           if (force) return true;
           const before = prev.get(`${coin.symbol}|${f}`);
-          // due when the newest closed candle closed AFTER the previous scan of this pair
           return !before || Date.parse(before.scanned_at) < boundaries.get(f)! + 5_000;
         }),
     );
@@ -483,70 +704,84 @@ Deno.serve(async (req: Request) => {
     let failed = 0;
     let notReady = 0;
 
-    const skipped = await mapPool(tasks, CONCURRENCY, async ({ coin, tf }) => {
-      try {
-        const candles = await fetchClosedCandles(coin.symbol, tf);
-        const last = candles[candles.length - 1];
-        // Binance has not published the newest closed candle yet -> retry next run instead of using stale data.
-        if (!last || last.closeTime < boundaries.get(tf)! - 1) {
-          notReady++;
-          return;
-        }
-        const r: CoreAnalysis | null = analyzeCore(candles, { timeframe: tf });
-        if (!r) {
+    const skipped = await mapPool(
+      tasks,
+      CONCURRENCY,
+      async ({ coin, tf }) => {
+        try {
+          const candles = await fetchClosedCandles(coin.symbol, tf);
+          const last = candles[candles.length - 1];
+          if (!last || last.closeTime < boundaries.get(tf)! - 1) {
+            notReady++;
+            return;
+          }
+          const r: CoreAnalysis | null = analyzeCore(candles, { timeframe: tf });
+          if (!r) {
+            failed++;
+            return;
+          }
+          const before = prev.get(`${coin.symbol}|${tf}`);
+          const p =
+            r.signalType === "BUY" || r.signalType === "SELL" || r.signalType === "WAIT" ? r.risk : null;
+          rows.push({
+            run_id: runId,
+            symbol: coin.symbol,
+            base_asset: coin.base,
+            market_rank: coin.rank,
+            timeframe: tf,
+            signal_type: r.signalType,
+            bias: r.bias,
+            score: r.score,
+            bull_score: r.bullScore,
+            bear_score: r.bearScore,
+            regime: r.regime,
+            trend: r.trend,
+            structure: r.structure,
+            risk_level: r.riskLevel,
+            price: r.price,
+            rsi: num(r.rsi),
+            atr_pct: num(r.atrPct),
+            rel_volume: num(r.relVolume),
+            entry_low: num(p?.entryLow),
+            entry_high: num(p?.entryHigh),
+            stop_loss: num(p?.stopLoss),
+            target1: num(p?.target1),
+            target2: num(p?.target2),
+            target3: num(p?.target3),
+            risk_reward: num(p?.riskReward),
+            shortable: null,
+            candle_close_time: new Date(r.candleCloseTime).toISOString(),
+            signal_since: before && before.signal_type === r.signalType ? before.signal_since : nowIso,
+            scanned_at: nowIso,
+            _isNew: !before || before.signal_type !== r.signalType,
+          });
+        } catch (e) {
           failed++;
-          return;
+          if (errors.length < 5) {
+            errors.push(`${coin.symbol} ${tf}: ${e instanceof Error ? e.message : String(e)}`);
+          }
         }
-        const before = prev.get(`${coin.symbol}|${tf}`);
-        const p = r.signalType === "BUY" || r.signalType === "SELL" || r.signalType === "WAIT" ? r.risk : null;
-        rows.push({
-          run_id: runId,
-          symbol: coin.symbol,
-          base_asset: coin.base,
-          market_rank: coin.rank,
-          timeframe: tf,
-          signal_type: r.signalType,
-          bias: r.bias,
-          score: r.score,
-          bull_score: r.bullScore,
-          bear_score: r.bearScore,
-          regime: r.regime,
-          trend: r.trend,
-          structure: r.structure,
-          risk_level: r.riskLevel,
-          price: r.price,
-          rsi: num(r.rsi),
-          atr_pct: num(r.atrPct),
-          rel_volume: num(r.relVolume),
-          entry_low: num(p?.entryLow),
-          entry_high: num(p?.entryHigh),
-          stop_loss: num(p?.stopLoss),
-          target1: num(p?.target1),
-          target2: num(p?.target2),
-          target3: num(p?.target3),
-          risk_reward: num(p?.riskReward),
-          shortable: null,
-          candle_close_time: new Date(r.candleCloseTime).toISOString(),
-          signal_since: before && before.signal_type === r.signalType ? before.signal_since : nowIso,
-          scanned_at: nowIso,
-          // internal flag, stripped before saving
-          _isNew: !before || before.signal_type !== r.signalType,
-        });
-      } catch (e) {
-        failed++;
-        if (errors.length < 5) errors.push(`${coin.symbol} ${tf}: ${e instanceof Error ? e.message : String(e)}`);
-      }
-    }, t0 + SCAN_BUDGET_MS);
+      },
+      t0 + SCAN_BUDGET_MS,
+    );
 
-    // shortable flag for SELL candidates (only fetched when needed)
-    // (BTC pairs have no USDT perpetual: a SELL there means "rotate into BTC", so the flag stays null)
     if (rows.some((r) => r.signal_type === "SELL" && quoteOf(r.symbol) === "USDT")) {
       const perps = await getFuturesPerps();
-      if (perps) for (const r of rows) if (r.signal_type === "SELL" && quoteOf(r.symbol) === "USDT") r.shortable = perps.has(r.symbol);
+      if (perps) {
+        for (const r of rows) {
+          if (r.signal_type === "SELL" && quoteOf(r.symbol) === "USDT") {
+            r.shortable = perps.has(r.symbol);
+          }
+        }
+      }
     }
 
     const freshActionable = rows.filter(
-      (r) => r._isNew === true && (r.signal_type === "BUY" || r.signal_type === "SELL") && r.stop_loss != null && r.target1 != null,
+      (r) =>
+        r._isNew === true &&
+        (r.signal_type === "BUY" || r.signal_type === "SELL") &&
+        r.stop_loss != null &&
+        r.target1 != null,
     );
     const toSave = rows.map((r) => {
       const copy = { ...r };
@@ -555,7 +790,9 @@ Deno.serve(async (req: Request) => {
     });
 
     for (let i = 0; i < toSave.length; i += 150) {
-      const { error } = await supabase.from("scan_results").upsert(toSave.slice(i, i + 150), { onConflict: "symbol,timeframe" });
+      const { error } = await supabase
+        .from("scan_results")
+        .upsert(toSave.slice(i, i + 150), { onConflict: "symbol,timeframe" });
       if (error) throw new Error(`saving results failed: ${error.message}`);
     }
 
@@ -565,29 +802,55 @@ Deno.serve(async (req: Request) => {
     try {
       const ev = await evaluateOpenOutcomes(supabase, t0);
       outcomesClosed = ev.closed;
-      // never register a signal whose candle is already older than two candle periods
-      const recent = freshActionable.filter((r) => t0 - Date.parse(r.candle_close_time) <= 2 * timeframeMs(r.timeframe));
+      const recent = freshActionable.filter(
+        (r) => t0 - Date.parse(r.candle_close_time) <= 2 * timeframeMs(r.timeframe),
+      );
       outcomesOpened = await registerNewOutcomes(supabase, recent, nowIso);
     } catch (e) {
       console.error("signal lab:", e instanceof Error ? e.message : String(e));
       if (errors.length < 5) errors.push(`signal lab: ${e instanceof Error ? e.message : String(e)}`);
     }
 
+    // ---------------- 4b. Reverse Signal Lab ----------------
+    try {
+      await backfillReverseOutcomes(supabase);
+      await syncReverseCancellations(supabase);
+      await evaluateOpenReverseOutcomes(supabase, t0);
+    } catch (e) {
+      console.error("reverse lab:", e instanceof Error ? e.message : String(e));
+      if (errors.length < 5) {
+        errors.push(`reverse lab: ${e instanceof Error ? e.message : String(e)}`);
+      }
+    }
+
     // ---------------- 5. housekeeping ----------------
     if (source === "coingecko-marketcap") {
-      // only trust the preferred source for removals; a fallback ranking must not wipe rows
       const symbolList = coins.map((c) => c.symbol).join(",");
       await supabase.from("scan_results").delete().not("symbol", "in", `(${symbolList})`);
     }
     await supabase.from("scan_results").delete().not("timeframe", "in", `(${TIMEFRAMES.join(",")})`);
-    await supabase.from("scan_results").delete().lt("scanned_at", new Date(t0 - STALE_ROW_DAYS * 86_400_000).toISOString());
-    await supabase.from("scan_runs").delete().lt("started_at", new Date(t0 - KEEP_RUNS_DAYS * 86_400_000).toISOString());
-    await supabase.from("signals").delete().lt("created_at", new Date(t0 - KEEP_SIGNALS_DAYS * 86_400_000).toISOString());
+    await supabase
+      .from("scan_results")
+      .delete()
+      .lt("scanned_at", new Date(t0 - STALE_ROW_DAYS * 86_400_000).toISOString());
+    await supabase
+      .from("scan_runs")
+      .delete()
+      .lt("started_at", new Date(t0 - KEEP_RUNS_DAYS * 86_400_000).toISOString());
+    await supabase
+      .from("signals")
+      .delete()
+      .lt("created_at", new Date(t0 - KEEP_SIGNALS_DAYS * 86_400_000).toISOString());
 
     const count = (type: string) => rows.filter((r) => r.signal_type === type).length;
     const incomplete = skipped > 0 || notReady > 0;
     const status = tasks.length > 0 && rows.length === 0 ? "failed" : incomplete ? "partial" : "ok";
-    const note = skipped > 0 ? `time budget reached, ${skipped} tasks skipped` : notReady > 0 ? `${notReady} candles not published yet, will retry` : null;
+    const note =
+      skipped > 0
+        ? `time budget reached, ${skipped} tasks skipped`
+        : notReady > 0
+          ? `${notReady} candles not published yet, will retry`
+          : null;
 
     await supabase
       .from("scan_runs")
@@ -633,7 +896,10 @@ Deno.serve(async (req: Request) => {
     });
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
-    await supabase.from("scan_runs").update({ finished_at: new Date().toISOString(), status: "failed", error: message }).eq("id", runId);
+    await supabase
+      .from("scan_runs")
+      .update({ finished_at: new Date().toISOString(), status: "failed", error: message })
+      .eq("id", runId);
     return json({ ok: false, error: message }, 500);
   }
 });
