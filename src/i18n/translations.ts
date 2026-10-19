@@ -298,6 +298,36 @@ export const translations: Translations = {
     fa: 'هنوز سیگنالی برای تست ثبت نشده. پس از اولین اسکن خودکار که سیگنال BUY/SELL بدهد، اینجا ظاهر می‌شود.',
     en: 'No signals recorded yet. After the next auto-scan that produces BUY/SELL signals, they will appear here.',
   },
+  // Reverse Signal Lab
+  reverseLab: { fa: 'آزمایشگاه سیگنال معکوس', en: 'Reverse Signal Lab' },
+  rlDescription: {
+    fa: 'برای هر سیگنال ثبت‌شده در آزمایشگاه سیگنال (اسکن خودکار و ردیابی دستی) یک معامله آینه‌ای ثبت می‌شود: BUY تبدیل به شورت و SELL تبدیل به خرید می‌شود. نتیجه روی سرور با همان کندل‌های بسته‌شده، همان کارمزد (حدود ۰٫۲۵٪) و همان زمان انقضا محاسبه می‌شود.',
+    en: 'Every signal recorded in Signal Lab (auto scan and manual tracking) gets a mirrored trade: BUY becomes a short and SELL becomes a buy. It is resolved on the server from the same closed candles, with the same fees (~0.25%) and the same expiry.',
+  },
+  rlRule: {
+    fa: 'قاعده: ورود یکسان؛ حد ضررِ معکوس = حد سودِ سیگنال اصلی؛ حد سودِ معکوس = حد ضررِ سیگنال اصلی.',
+    en: 'Rule: same entry; reverse stop-loss = original take-profit; reverse take-profit = original stop-loss.',
+  },
+  rlNoData: {
+    fa: 'هنوز معامله معکوسی ثبت نشده. پس از اجرای بعدی اسکن خودکار، معکوسِ سیگنال‌های ثبت‌شده اینجا ظاهر می‌شود.',
+    en: 'No reverse trades yet. After the next auto-scan run, mirrors of the recorded signals will appear here.',
+  },
+  rlOriginalSignal: { fa: 'سیگنال اصلی', en: 'Original' },
+  rlReverseSignal: { fa: 'سیگنال معکوس', en: 'Reverse' },
+  rlOriginalResult: { fa: 'نتیجه اصلی', en: 'Original result' },
+  rlReverseResult: { fa: 'نتیجه معکوس', en: 'Reverse result' },
+  rlOriginalLab: { fa: 'سیگنال اصلی', en: 'Original' },
+  rlCompareTitle: { fa: 'مقایسه: اصلی در برابر معکوس', en: 'Original vs reverse' },
+  rlCompareHint: {
+    fa: 'همان معاملات، یک‌بار با جهت و حدهای اصلی و یک‌بار معکوس (هر دو پس از کسر کارمزد).',
+    en: 'The same trades, scored once as originally issued and once reversed (both net of fees).',
+  },
+  rlOriginalOf: { fa: 'سیگنال اصلی', en: 'Original signal' },
+  rlReverseHint: {
+    fa: 'این معامله معکوسِ یک سیگنال است: حد ضرر و حد سود با سیگنال اصلی جابه‌جا شده‌اند.',
+    en: 'This is the reverse of a signal: stop-loss and take-profit are swapped with the original.',
+  },
+  backToReverseLab: { fa: 'بازگشت به آزمایشگاه معکوس', en: 'Back to Reverse Lab' },
   slByTimeframe: { fa: 'بر اساس تایم‌فریم', en: 'By Timeframe' },
   slByScore: { fa: 'بر اساس امتیاز', en: 'By Score' },
   avgPnl: { fa: 'میانگین PnL', en: 'Avg PnL' },
