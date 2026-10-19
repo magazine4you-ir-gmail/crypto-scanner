@@ -18,6 +18,7 @@ import {
   Menu,
   X,
   TestTubes,
+  ArrowLeftRight,
   Zap,
 } from 'lucide-react';
 import { useState } from 'react';
@@ -27,6 +28,7 @@ const navItems = [
   { key: 'scanner', path: '/scanner', icon: Radar },
   { key: 'autoScan', path: '/auto-scan', icon: Timer },
   { key: 'signalLab', path: '/signal-lab', icon: TestTubes },
+  { key: 'reverseLab', path: '/reverse-lab', icon: ArrowLeftRight },
   { key: 'scalp', path: '/scalp', icon: Zap },
   { key: 'watchlist', path: '/watchlist', icon: Star },
   { key: 'portfolio', path: '/portfolio', icon: Briefcase },
