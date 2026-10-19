@@ -52,10 +52,22 @@ Separate strategy module `supabase/functions/_shared/scalp.ts` (alias `@scalp`, 
 * Resolved **on the server** from closed candles after the signal candle: stop is checked before target in the same bar, gaps exit at the open, 0.25 % round-trip cost is deducted, expiry after N bars.
 * The browser is read-only; nobody can edit statistics (RLS write policies were removed).
 
+### Reverse Signal Lab (`/reverse-lab`)
+Every trade registered in Signal Lab (auto scan **and** manual tracking) gets exactly ONE mirrored paper trade:
+* direction flips (**BUY → SELL/short**, **SELL → BUY**), same entry,
+* **reverse stop-loss = original take-profit** and **reverse take-profit = original stop-loss**,
+* resolved by the same `resolveTrade` (stop checked first, gaps exit at the open, 0.25 % cost, same expiry) from the same closed candles.
+
+Implementation: pure geometry in `engine.ts` (`reversePlan`, `buildReverseOutcomeRow`, covered by `reverse.test.ts`); table `reverse_signal_outcomes` (1 : 1 with `signal_outcomes` via `origin_outcome_id`, read-only for browsers).
+* `scheduled-scan` resolves originals and mirrors in one candle pass, back-fills any missing mirror (also for old signals) and cancels the mirror when the original is cancelled (opposite signal).
+* `track-signal` registers the mirror right after a manual track (best effort; the hourly scan heals a miss).
+* The original tables, statistics and pages are not touched. The page shows the reverse statistics and an *original vs reverse* comparison on the very same trades.
+* Honest limits: fees hurt both sides, so the two results are not exact opposites; if one bar touches both levels it is a LOSS for both (stop-first rule); a gap through the original stop is booked at the open for the original but at the planned target for the reverse.
+
 ## Setup
 
 1. `npm install`, copy `.env.example` → `.env`.
-2. Apply the migrations in `supabase/migrations/` (SQL editor or `supabase db push`). The newest one, `20261010000000_hardening_and_outcomes_v2.sql`, closes the security hole on `signal_outcomes` and cleans legacy duplicates.
+2. Apply the migrations in `supabase/migrations/` (SQL editor or `supabase db push`). `20261010000000_hardening_and_outcomes_v2.sql` closes the security hole on `signal_outcomes`; `20261019000000_reverse_signal_lab.sql` adds the Reverse Signal Lab table.
 3. Deploy the functions (CLI — they import `../_shared/engine.ts`, so the dashboard editor is **not** suitable):
    ```bash
    supabase secrets set CRON_SECRET=<long random string>
@@ -63,6 +75,7 @@ Separate strategy module `supabase/functions/_shared/scalp.ts` (alias `@scalp`, 
    supabase functions deploy market-data --no-verify-jwt
    supabase functions deploy track-signal --no-verify-jwt
    ```
+   (Apply the reverse-lab migration BEFORE or together with the deploy. If the functions are deployed first nothing breaks: the reverse step is skipped until the table exists.)
 4. Schedule the scan: edit and run `supabase/cron_setup.sql` once (pg_cron + pg_net, minute :01 every hour).
 5. Test a run: `curl -X POST -H "x-cron-secret: <CRON_SECRET>" "https://<PROJECT_REF>.supabase.co/functions/v1/scheduled-scan?force=1"`.
 
