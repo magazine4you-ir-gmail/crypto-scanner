@@ -1079,3 +1079,104 @@ export function resolveTrade(
   }
   return null;
 }
+
+// =====================================================================
+// Reverse Signal Lab (آزمایشگاه سیگنال معکوس)
+// =====================================================================
+//
+// Every signal registered in Signal Lab (auto scan AND manual tracking) gets ONE reverse paper trade:
+//   - direction flips            BUY -> SELL (short) · SELL -> BUY (long)
+//   - same entry                 (close of the signal candle)
+//   - stop-loss  = the ORIGINAL take-profit   (the level the original wanted to reach)
+//   - take-profit = the ORIGINAL stop-loss    (the level the original was afraid of)
+// It is then resolved by the very same `resolveTrade` (stop checked first, gaps exit at the open,
+// same cost, same expiry), so the two labs are directly comparable.
+
+export type OutcomeSide = 'BUY' | 'SELL';
+
+/** The columns of a `signal_outcomes` row that the reverse trade is derived from. */
+export interface OriginOutcome {
+  id: string;
+  symbol: string;
+  base_asset: string;
+  timeframe: string;
+  signal_type: OutcomeSide;
+  score: number;
+  price_at_signal: number;
+  entry_low: number | null;
+  entry_high: number | null;
+  stop_loss: number;
+  target1: number;
+  signal_at: string;
+  candle_close_time: string | null;
+  source: string;
+  tracked_by: string | null;
+}
+
+export interface ReversePlan {
+  signalType: OutcomeSide;
+  direction: Direction;
+  entry: number;
+  stop: number;
+  target: number;
+  /** reward / risk of the reverse trade (= original risk / original reward). */
+  riskReward: number;
+}
+
+export function oppositeSide(side: OutcomeSide): OutcomeSide {
+  return side === 'BUY' ? 'SELL' : 'BUY';
+}
+
+/**
+ * Pure geometry of the reverse trade. Returns null when the original levels are not a valid plan
+ * (BUY needs stop < entry < target, SELL needs target < entry < stop) so a corrupt row never creates a trade.
+ */
+export function reversePlan(origin: { signalType: OutcomeSide; entry: number; stop: number; target: number }): ReversePlan | null {
+  const { signalType, entry, stop, target } = origin;
+  if (![entry, stop, target].every((v) => Number.isFinite(v) && v > 0)) return null;
+  const valid = signalType === 'BUY' ? stop < entry && entry < target : target < entry && entry < stop;
+  if (!valid) return null;
+
+  const originalRisk = Math.abs(entry - stop);
+  const originalReward = Math.abs(target - entry);
+  const side = oppositeSide(signalType);
+  return {
+    signalType: side,
+    direction: side === 'BUY' ? 'LONG' : 'SHORT',
+    entry,
+    stop: target,
+    target: stop,
+    riskReward: originalRisk / originalReward,
+  };
+}
+
+/** Row to insert into `reverse_signal_outcomes` for a given original outcome (null if the origin is unusable). */
+export function buildReverseOutcomeRow(origin: OriginOutcome): Record<string, unknown> | null {
+  const plan = reversePlan({
+    signalType: origin.signal_type,
+    entry: Number(origin.price_at_signal),
+    stop: Number(origin.stop_loss),
+    target: Number(origin.target1),
+  });
+  if (!plan) return null;
+  return {
+    origin_outcome_id: origin.id,
+    symbol: origin.symbol,
+    base_asset: origin.base_asset,
+    timeframe: origin.timeframe,
+    signal_type: plan.signalType,
+    origin_signal_type: origin.signal_type,
+    score: origin.score,
+    price_at_signal: plan.entry,
+    entry_low: origin.entry_low,
+    entry_high: origin.entry_high,
+    stop_loss: plan.stop,
+    target1: plan.target,
+    risk_reward: plan.riskReward,
+    signal_at: origin.signal_at,
+    candle_close_time: origin.candle_close_time,
+    status: 'OPEN',
+    source: origin.source,
+    tracked_by: origin.tracked_by,
+  };
+}
