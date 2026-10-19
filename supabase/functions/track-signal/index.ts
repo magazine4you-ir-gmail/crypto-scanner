@@ -7,10 +7,14 @@
 //
 // POST  Authorization: Bearer <user access token>   body: { "symbol": "SOLUSDT" | "SOLBTC", "timeframe": "1h" }
 // Deploy with --no-verify-jwt (the token is verified inside, see below).
+//
+// Reverse Signal Lab: right after the manual signal is registered, its mirrored trade (direction flipped,
+// stop <-> target swapped) is registered too. This is best effort: if it fails, the hourly `scheduled-scan`
+// back-fills the missing mirror, so a manual track never fails because of the reverse lab.
 
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "npm:@supabase/supabase-js@2.57.4";
-import { analyzeCore, closedCandles, lastBoundary, normalizeSymbol, splitSymbol, type Candle } from "../_shared/engine.ts";
+import { analyzeCore, buildReverseOutcomeRow, closedCandles, lastBoundary, normalizeSymbol, splitSymbol, type Candle } from "../_shared/engine.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -120,6 +124,7 @@ Deno.serve(async (req: Request) => {
 
   // --- register ---
   const p = a.risk;
+  const signalAtIso = new Date().toISOString();
   const { data: inserted, error } = await supabase
     .from("signal_outcomes")
     .insert({
@@ -135,7 +140,7 @@ Deno.serve(async (req: Request) => {
       target1: p.target1,
       target2: p.target2,
       risk_reward: p.riskReward,
-      signal_at: new Date().toISOString(),
+      signal_at: signalAtIso,
       candle_close_time: closeIso,
       status: "OPEN",
       source: "manual_track",
@@ -149,5 +154,35 @@ Deno.serve(async (req: Request) => {
     if (error.code === "23505") return json({ ok: true, already: true, signal_type: a.signalType, score: a.score });
     return json({ ok: false, reason: "server_error" }, 500);
   }
+
+  // --- reverse mirror (best effort, idempotent: unique index on origin_outcome_id) ---
+  try {
+    const mirror = buildReverseOutcomeRow({
+      id: inserted.id as string,
+      symbol,
+      base_asset: splitSymbol(symbol)?.base ?? symbol,
+      timeframe,
+      signal_type: a.signalType,
+      score: a.score,
+      price_at_signal: a.price,
+      entry_low: p.entryLow,
+      entry_high: p.entryHigh,
+      stop_loss: p.stopLoss,
+      target1: p.target1,
+      signal_at: signalAtIso,
+      candle_close_time: closeIso,
+      source: "manual_track",
+      tracked_by: userId,
+    });
+    if (mirror) {
+      const { error: mirrorError } = await supabase
+        .from("reverse_signal_outcomes")
+        .upsert(mirror, { onConflict: "origin_outcome_id", ignoreDuplicates: true });
+      if (mirrorError) console.error("reverse mirror:", mirrorError.message);
+    }
+  } catch (e) {
+    console.error("reverse mirror:", e instanceof Error ? e.message : String(e));
+  }
+
   return json({ ok: true, already: false, id: inserted.id, signal_type: a.signalType, score: a.score, price: a.price, stop_loss: p.stopLoss, target1: p.target1 });
 });
