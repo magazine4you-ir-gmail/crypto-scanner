@@ -13,6 +13,7 @@ import {
   type SignalOutcome,
   type OutcomeStatus,
 } from '@/services/outcomeService';
+import { fetchReverseOutcomeById, fetchReverseOutcomesBySymbol } from '@/services/reverseOutcomeService';
 import { findSwingPoints } from '@/engine/marketStructure';
 import { findSupportResistance as findSR } from '@/engine/supportResistance';
 import type { Candle, Timeframe, TickerStat } from '@/types/market';
@@ -30,6 +31,8 @@ export function AssetDetailPage() {
   const { symbol } = useParams<{ symbol: string }>();
   const [searchParams] = useSearchParams();
   const outcomeId = searchParams.get('outcome');
+  // ?reverse=1 -> the outcome belongs to the Reverse Signal Lab (mirrored trade)
+  const isReverse = searchParams.get('reverse') === '1';
   const tfFromUrl = searchParams.get('tf');
 
   const { t, lang, settings } = useSettings();
@@ -81,7 +84,7 @@ export function AssetDetailPage() {
         })),
         getSignalHistory(fullSymbol, 10).catch(() => []),
         fetchTickers([fullSymbol]).catch(() => []),
-        fetchOutcomesBySymbol(fullSymbol, 40).catch(() => [] as SignalOutcome[]),
+        (isReverse ? fetchReverseOutcomesBySymbol(fullSymbol, 40) : fetchOutcomesBySymbol(fullSymbol, 40)).catch(() => [] as SignalOutcome[]),
       ]);
 
       // counterpart pair (best effort: a coin may not be listed in both currencies)
@@ -108,7 +111,7 @@ export function AssetDetailPage() {
           setLabOutcome(fromList);
         } else {
           try {
-            const one = await fetchOutcomeById(outcomeId);
+            const one = await (isReverse ? fetchReverseOutcomeById(outcomeId) : fetchOutcomeById(outcomeId));
             setLabOutcome(one);
           } catch {
             setLabOutcome(null);
@@ -134,7 +137,7 @@ export function AssetDetailPage() {
   useEffect(() => {
     void load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [symbol, timeframe, outcomeId]);
+  }, [symbol, timeframe, outcomeId, isReverse]);
 
   const handleAnalyze = async () => {
     if (!symbol || candles.length < 50) return;
@@ -180,9 +183,9 @@ export function AssetDetailPage() {
     <div className="space-y-4 sm:space-y-6">
       <div className="flex items-center gap-3 sm:gap-4">
         <Link
-          to={outcomeId ? '/signal-lab' : '/scanner'}
+          to={outcomeId ? (isReverse ? '/reverse-lab' : '/signal-lab') : '/scanner'}
           className="p-2 rounded-lg hover:bg-surface-100 text-slate-400"
-          title={outcomeId ? t('backToLab') : undefined}
+          title={outcomeId ? (isReverse ? t('backToReverseLab') : t('backToLab')) : undefined}
         >
           <ArrowLeft className="w-5 h-5 rtl:rotate-180" />
         </Link>
@@ -280,7 +283,7 @@ export function AssetDetailPage() {
               <Target className="w-5 h-5 text-warning-400" /> {t('labSignal')}
             </span>
           </SectionTitle>
-          <p className="text-xs text-slate-400 mb-4">{t('labSignalHint')}</p>
+          <p className="text-xs text-slate-400 mb-4">{isReverse ? t('rlReverseHint') : t('labSignalHint')}</p>
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4 mb-4">
             <InfoBox label={t('signal')}>
               <span className={labOutcome.signal_type === 'BUY' ? 'signal-buy' : 'signal-sell'}>
@@ -459,7 +462,7 @@ export function AssetDetailPage() {
         <Card>
           <SectionTitle>
             <span className="flex items-center gap-2">
-              <BookOpen className="w-5 h-5 text-primary-400" /> {t('signalLab')} — {t('signalHistory')}
+              <BookOpen className="w-5 h-5 text-primary-400" /> {isReverse ? t('reverseLab') : t('signalLab')} — {t('signalHistory')}
             </span>
           </SectionTitle>
           <div className="overflow-x-auto">
