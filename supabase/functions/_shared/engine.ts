@@ -1127,26 +1127,52 @@ export function oppositeSide(side: OutcomeSide): OutcomeSide {
   return side === 'BUY' ? 'SELL' : 'BUY';
 }
 
-/**
- * Pure geometry of the reverse trade. Returns null when the original levels are not a valid plan
- * (BUY needs stop < entry < target, SELL needs target < entry < stop) so a corrupt row never creates a trade.
- */
-export function reversePlan(origin: { signalType: OutcomeSide; entry: number; stop: number; target: number }): ReversePlan | null {
+export function reversePlan(origin: {
+  signalType: OutcomeSide;
+  entry: number;
+  stop: number;
+  target: number;
+}): ReversePlan | null {
   const { signalType, entry, stop, target } = origin;
   if (![entry, stop, target].every((v) => Number.isFinite(v) && v > 0)) return null;
-  const valid = signalType === 'BUY' ? stop < entry && entry < target : target < entry && entry < stop;
+
+  const valid =
+    signalType === "BUY"
+      ? stop < entry && entry < target
+      : target < entry && entry < stop;
   if (!valid) return null;
 
   const originalRisk = Math.abs(entry - stop);
   const originalReward = Math.abs(target - entry);
+  if (originalRisk <= 0 || originalReward <= 0) return null;
+
   const side = oppositeSide(signalType);
+
+  // همان فاصلهٔ ریسک/سود اصلی، فقط جهت برعکس — R/R حفظ می‌شود
+  if (side === "BUY") {
+    const revStop = entry - originalRisk;
+    const revTarget = entry + originalReward;
+    if (revStop <= 0) return null;
+    return {
+      signalType: side,
+      direction: "LONG",
+      entry,
+      stop: revStop,
+      target: revTarget,
+      riskReward: originalReward / originalRisk,
+    };
+  }
+
+  const revStop = entry + originalRisk;
+  const revTarget = entry - originalReward;
+  if (revTarget <= 0) return null;
   return {
     signalType: side,
-    direction: side === 'BUY' ? 'LONG' : 'SHORT',
+    direction: "SHORT",
     entry,
-    stop: target,
-    target: stop,
-    riskReward: originalRisk / originalReward,
+    stop: revStop,
+    target: revTarget,
+    riskReward: originalReward / originalRisk,
   };
 }
 
