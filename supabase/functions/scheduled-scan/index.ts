@@ -1,26 +1,21 @@
 // supabase/functions/scheduled-scan/index.ts
 //
-// اسکن خودکار ساعتی ارزهای برتر (Buy / Short / Wait) + ارزیابی نتایج Signal Lab + Reverse Signal Lab.
-// Hourly server-side scan of the top coins, called by pg_cron (see supabase/cron_setup.sql).
+// اسکن خودکار ساعتی ارزهای برتر (Buy / Short / Wait)
+// + Signal Lab + Reverse Signal Lab
 //
 // What one run does:
-//   1. Builds the coin universe (CoinGecko market cap ∩ Binance spot, min liquidity):
-//        - USDT pairs for the top TOP_N coins
-//        - BTC pairs for the top BTC_TOP_N coins
-//   2. Scans only the (coin, timeframe) pairs whose candle closed since their last scan.
-//   3. Upserts the latest result per (symbol, timeframe) into `scan_results`.
-//   4. Signal Lab (paper trading):
-//        a. resolves OPEN outcomes (WIN / LOSS / EXPIRED) from CLOSED candles, after fees,
-//        b. registers NEW BUY/SELL signals exactly once per signal candle.
+//   1. Builds the coin universe (CoinGecko ∩ Binance spot, min liquidity)
+//   2. Scans due (symbol, timeframe) pairs
+//   3. Upserts scan_results
+//   4. Signal Lab: resolve OPEN + register new BUY/SELL once per candle
 //   4b. Reverse Signal Lab:
-//        a. backfills missing reverse_signal_outcomes rows for existing signal_outcomes,
-//        b. mirrors CANCELLED origin rows onto reverse rows,
-//        c. resolves OPEN reverse rows with the same resolveTrade engine.
-//   5. Housekeeping.
+//        - backfill missing reverse rows for ALL non-CANCELLED outcomes (paginated)
+//        - mirror CANCELLED origins
+//        - resolve OPEN reverse trades (including historical closed origins)
+//   5. Housekeeping
 //
-// Auth: header  x-cron-secret: <CRON_SECRET>   (deploy with --no-verify-jwt)
-// Optional query:  ?force=1  (rescan everything)   ?tf=1h,4h  (limit timeframes)
-// Secrets: CRON_SECRET (required), COINGECKO_API_KEY (optional)
+// Auth: header x-cron-secret: <CRON_SECRET>
+// Optional: ?force=1   ?tf=1h,4h
 
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "npm:@supabase/supabase-js@2.57.4";
@@ -47,12 +42,15 @@ const BTC_TOP_N = 50;
 const CANDLE_LIMIT = 300;
 const CONCURRENCY = 8;
 const SCAN_BUDGET_MS = 85_000;
-const EVAL_BUDGET_MS = 125_000;
+const EVAL_BUDGET_MS = 140_000;
 const MIN_QUOTE_VOLUME = 2_000_000;
 const MIN_BTC_PAIR_VOLUME_USD = 300_000;
 const KEEP_RUNS_DAYS = 14;
 const KEEP_SIGNALS_DAYS = 30;
 const STALE_ROW_DAYS = 3;
+
+const REVERSE_PAGE = 500;
+const REVERSE_MAX_PAGES = 40;
 
 const BINANCE_BASE = "https://data-api.binance.vision";
 const BINANCE_FUTURES = "https://fapi.binance.com";
@@ -476,166 +474,233 @@ async function registerNewOutcomes(
 // Reverse Signal Lab
 // ---------------------------------------------------------------------
 
-/** Create reverse rows for any signal_outcomes that still lack a mirror. */
+/** همهٔ signal_outcomes غیر CANCELLED که هنوز mirror ندارند. */
 async function backfillReverseOutcomes(supabase: SupabaseClient): Promise<number> {
-  const { data: origins, error } = await supabase
-    .from("signal_outcomes")
-    .select(
-      "id, symbol, base_asset, timeframe, signal_type, score, price_at_signal, entry_low, entry_high, stop_loss, target1, signal_at, candle_close_time, source, tracked_by, status",
-    )
-    .neq("status", "CANCELLED")
-    .order("signal_at", { ascending: false })
-    .limit(800);
-  if (error) {
-    console.error("reverse backfill load:", error.message);
-    return 0;
-  }
-  if (!origins?.length) return 0;
+  let created = 0;
+  let offset = 0;
 
-  const ids = origins.map((o) => o.id as string);
-  const { data: existing } = await supabase
-    .from("reverse_signal_outcomes")
-    .select("origin_outcome_id")
-    .in("origin_outcome_id", ids);
-  const have = new Set((existing ?? []).map((r) => r.origin_outcome_id as string));
+  for (let page = 0; page < REVERSE_MAX_PAGES; page++) {
+    const { data: origins, error } = await supabase
+      .from("signal_outcomes")
+      .select(
+        "id, symbol, base_asset, timeframe, signal_type, score, price_at_signal, entry_low, entry_high, stop_loss, target1, signal_at, candle_close_time, source, tracked_by, status",
+      )
+      .neq("status", "CANCELLED")
+      .order("signal_at", { ascending: false })
+      .range(offset, offset + REVERSE_PAGE - 1);
 
-  const rows: Record<string, unknown>[] = [];
-  for (const o of origins) {
-    if (have.has(o.id as string)) continue;
-    const mirror = buildReverseOutcomeRow({
-      id: o.id as string,
-      symbol: o.symbol as string,
-      base_asset: o.base_asset as string,
-      timeframe: o.timeframe as string,
-      signal_type: o.signal_type as "BUY" | "SELL",
-      score: Number(o.score),
-      price_at_signal: Number(o.price_at_signal),
-      entry_low: o.entry_low != null ? Number(o.entry_low) : null,
-      entry_high: o.entry_high != null ? Number(o.entry_high) : null,
-      stop_loss: Number(o.stop_loss),
-      target1: Number(o.target1),
-      signal_at: o.signal_at as string,
-      candle_close_time: (o.candle_close_time as string) ?? null,
-      source: (o.source as string) ?? "auto_scan",
-      tracked_by: (o.tracked_by as string) ?? null,
-    });
-    if (mirror) rows.push(mirror);
-  }
-  if (!rows.length) return 0;
+    if (error) {
+      console.error("reverse backfill load:", error.message);
+      break;
+    }
+    if (!origins?.length) break;
 
-  let n = 0;
-  for (let i = 0; i < rows.length; i += 100) {
-    const chunk = rows.slice(i, i + 100);
-    const { error: upErr } = await supabase
+    const ids = origins.map((o) => o.id as string);
+    const { data: existing } = await supabase
       .from("reverse_signal_outcomes")
-      .upsert(chunk, { onConflict: "origin_outcome_id", ignoreDuplicates: true });
-    if (upErr) console.error("reverse backfill upsert:", upErr.message);
-    else n += chunk.length;
+      .select("origin_outcome_id")
+      .in("origin_outcome_id", ids);
+    const have = new Set((existing ?? []).map((r) => r.origin_outcome_id as string));
+
+    const rows: Record<string, unknown>[] = [];
+    for (const o of origins) {
+      if (have.has(o.id as string)) continue;
+      const mirror = buildReverseOutcomeRow({
+        id: o.id as string,
+        symbol: o.symbol as string,
+        base_asset: o.base_asset as string,
+        timeframe: o.timeframe as string,
+        signal_type: o.signal_type as "BUY" | "SELL",
+        score: Number(o.score),
+        price_at_signal: Number(o.price_at_signal),
+        entry_low: o.entry_low != null ? Number(o.entry_low) : null,
+        entry_high: o.entry_high != null ? Number(o.entry_high) : null,
+        stop_loss: Number(o.stop_loss),
+        target1: Number(o.target1),
+        signal_at: o.signal_at as string,
+        candle_close_time: (o.candle_close_time as string) ?? null,
+        source: (o.source as string) ?? "auto_scan",
+        tracked_by: (o.tracked_by as string) ?? null,
+      });
+      if (mirror) {
+        rows.push(mirror);
+      } else {
+        console.warn(
+          `reverse skip invalid plan: ${o.symbol} ${o.timeframe} ${o.signal_type} entry=${o.price_at_signal} stop=${o.stop_loss} target=${o.target1}`,
+        );
+      }
+    }
+
+    for (let i = 0; i < rows.length; i += 100) {
+      const chunk = rows.slice(i, i + 100);
+      const { error: upErr } = await supabase
+        .from("reverse_signal_outcomes")
+        .upsert(chunk, { onConflict: "origin_outcome_id", ignoreDuplicates: true });
+      if (upErr) console.error("reverse backfill upsert:", upErr.message);
+      else created += chunk.length;
+    }
+
+    if (origins.length < REVERSE_PAGE) break;
+    offset += REVERSE_PAGE;
   }
-  return n;
+
+  console.log(`reverse backfill created≈${created}`);
+  return created;
 }
 
-/** If origin was CANCELLED, cancel its reverse mirror too. */
+/** originهای CANCELLED → reverse OPEN هم CANCELLED */
 async function syncReverseCancellations(supabase: SupabaseClient): Promise<number> {
-  const { data: cancelled } = await supabase
-    .from("signal_outcomes")
-    .select("id")
-    .eq("status", "CANCELLED")
-    .order("signal_at", { ascending: false })
-    .limit(500);
-  if (!cancelled?.length) return 0;
+  let total = 0;
+  let offset = 0;
 
-  const ids = cancelled.map((c) => c.id as string);
-  const { data: updated, error } = await supabase
-    .from("reverse_signal_outcomes")
-    .update({
-      status: "CANCELLED",
-      notes: "origin cancelled",
-      exit_at: new Date().toISOString(),
-    })
-    .in("origin_outcome_id", ids)
-    .eq("status", "OPEN")
-    .select("id");
-  if (error) {
-    console.error("reverse cancel sync:", error.message);
-    return 0;
+  for (let page = 0; page < REVERSE_MAX_PAGES; page++) {
+    const { data: cancelled } = await supabase
+      .from("signal_outcomes")
+      .select("id")
+      .eq("status", "CANCELLED")
+      .order("signal_at", { ascending: false })
+      .range(offset, offset + REVERSE_PAGE - 1);
+    if (!cancelled?.length) break;
+
+    const ids = cancelled.map((c) => c.id as string);
+    const { data: updated, error } = await supabase
+      .from("reverse_signal_outcomes")
+      .update({
+        status: "CANCELLED",
+        notes: "origin cancelled",
+        exit_at: new Date().toISOString(),
+      })
+      .in("origin_outcome_id", ids)
+      .eq("status", "OPEN")
+      .select("id");
+    if (error) console.error("reverse cancel sync:", error.message);
+    else total += updated?.length ?? 0;
+
+    if (cancelled.length < REVERSE_PAGE) break;
+    offset += REVERSE_PAGE;
   }
-  return updated?.length ?? 0;
+  return total;
 }
 
-/** Resolve OPEN reverse trades with the same engine as Signal Lab. */
+/** چند صفحه کندل بعد از startTime (برای سیگنال‌های قدیمی). */
+async function fetchCandlesAfter(symbol: string, tf: string, startTime: number): Promise<Candle[]> {
+  const all: Candle[] = [];
+  let cursor = startTime;
+  for (let hop = 0; hop < 5; hop++) {
+    const rows = (await fetchJson(
+      `${BINANCE_BASE}/api/v3/klines?symbol=${symbol}&interval=${tf}&startTime=${cursor}&limit=1000`,
+    )) as unknown[][];
+    if (!rows?.length) break;
+    const batch = closedCandles(parseKlines(rows));
+    if (!batch.length) break;
+    all.push(...batch);
+    if (rows.length < 1000) break;
+    cursor = batch[batch.length - 1].closeTime + 1;
+  }
+  return all;
+}
+
+/**
+ * همهٔ reverseهای OPEN را resolve می‌کند
+ * (حتی اگر origin از قبل WIN/LOSS/EXPIRED باشد).
+ */
 async function evaluateOpenReverseOutcomes(
   supabase: SupabaseClient,
   t0: number,
 ): Promise<{ checked: number; closed: number }> {
-  const { data, error } = await supabase
-    .from("reverse_signal_outcomes")
-    .select("id, symbol, timeframe, signal_type, price_at_signal, stop_loss, target1, signal_at, candle_close_time")
-    .eq("status", "OPEN")
-    .limit(1000);
-  if (error) throw new Error(`load open reverse outcomes: ${error.message}`);
-  const open = (data ?? []) as OutcomeRow[];
-  if (open.length === 0) return { checked: 0, closed: 0 };
+  let checked = 0;
+  let closed = 0;
 
-  const baseTs = (o: OutcomeRow) => Date.parse(o.candle_close_time ?? o.signal_at);
-  const groups = new Map<string, OutcomeRow[]>();
-  for (const o of open) {
-    const key = `${o.symbol}|${o.timeframe}`;
-    const list = groups.get(key);
-    if (list) list.push(o);
-    else groups.set(key, [o]);
+  for (let page = 0; page < REVERSE_MAX_PAGES; page++) {
+    if (Date.now() > t0 + EVAL_BUDGET_MS) {
+      console.warn("reverse evaluate: time budget reached");
+      break;
+    }
+
+    // همیشه از اول OPENها (قدیمی‌تر اول) — بعد از update دیگر در OPEN نیستند
+    const { data, error } = await supabase
+      .from("reverse_signal_outcomes")
+      .select(
+        "id, symbol, timeframe, signal_type, price_at_signal, stop_loss, target1, signal_at, candle_close_time",
+      )
+      .eq("status", "OPEN")
+      .order("signal_at", { ascending: true })
+      .limit(REVERSE_PAGE);
+
+    if (error) throw new Error(`load open reverse outcomes: ${error.message}`);
+    const open = (data ?? []) as OutcomeRow[];
+    if (!open.length) break;
+
+    checked += open.length;
+
+    const baseTs = (o: OutcomeRow) => Date.parse(o.candle_close_time ?? o.signal_at);
+    const groups = new Map<string, OutcomeRow[]>();
+    for (const o of open) {
+      const key = `${o.symbol}|${o.timeframe}`;
+      const list = groups.get(key);
+      if (list) list.push(o);
+      else groups.set(key, [o]);
+    }
+
+    let pageClosed = 0;
+    await mapPool(
+      [...groups.entries()],
+      CONCURRENCY,
+      async ([key, outcomes]) => {
+        const [symbol, tf] = key.split("|");
+        try {
+          const start = Math.min(...outcomes.map(baseTs)) + 1;
+          const allCandles = await fetchCandlesAfter(symbol, tf, start);
+
+          for (const o of outcomes) {
+            const base = baseTs(o);
+            const after = allCandles.filter((c) => c.closeTime > base);
+            const res = resolveTrade(
+              {
+                direction: o.signal_type === "BUY" ? "LONG" : "SHORT",
+                entry: Number(o.price_at_signal),
+                stop: Number(o.stop_loss),
+                target: Number(o.target1),
+                maxBars: EXPIRY_BARS[tf] ?? 40,
+              },
+              after,
+            );
+            if (!res) continue;
+            const { error: upErr } = await supabase
+              .from("reverse_signal_outcomes")
+              .update({
+                status: res.status,
+                exit_price: res.exitPrice,
+                exit_at: new Date(res.exitTime).toISOString(),
+                pnl_pct: res.pnlPct,
+                pnl_gross_pct: res.grossPnlPct,
+                r_multiple: res.rMultiple,
+                bars_held: res.barsHeld,
+                notes: res.status === "EXPIRED" ? "time expiry" : null,
+              })
+              .eq("id", o.id)
+              .eq("status", "OPEN");
+            if (!upErr) {
+              closed++;
+              pageClosed++;
+            }
+          }
+        } catch (e) {
+          console.error(`evaluate reverse ${key}:`, e instanceof Error ? e.message : String(e));
+        }
+      },
+      t0 + EVAL_BUDGET_MS,
+    );
+
+    // اگر هیچ‌کدام بسته نشد، ادامه بده باعث حلقه بی‌نهایت می‌شود
+    if (pageClosed === 0) {
+      console.warn(`reverse evaluate: no progress on page ${page}, remaining OPEN will retry next run`);
+      break;
+    }
   }
 
-  let closed = 0;
-  await mapPool(
-    [...groups.entries()],
-    CONCURRENCY,
-    async ([key, outcomes]) => {
-      const [symbol, tf] = key.split("|");
-      try {
-        const start = Math.min(...outcomes.map(baseTs)) + 1;
-        const rows = (await fetchJson(
-          `${BINANCE_BASE}/api/v3/klines?symbol=${symbol}&interval=${tf}&startTime=${start}&limit=1000`,
-        )) as unknown[][];
-        const candles = closedCandles(parseKlines(rows));
-        for (const o of outcomes) {
-          const base = baseTs(o);
-          const after = candles.filter((c) => c.closeTime > base);
-          const res = resolveTrade(
-            {
-              direction: o.signal_type === "BUY" ? "LONG" : "SHORT",
-              entry: Number(o.price_at_signal),
-              stop: Number(o.stop_loss),
-              target: Number(o.target1),
-              maxBars: EXPIRY_BARS[tf] ?? 40,
-            },
-            after,
-          );
-          if (!res) continue;
-          const { error: upErr } = await supabase
-            .from("reverse_signal_outcomes")
-            .update({
-              status: res.status,
-              exit_price: res.exitPrice,
-              exit_at: new Date(res.exitTime).toISOString(),
-              pnl_pct: res.pnlPct,
-              pnl_gross_pct: res.grossPnlPct,
-              r_multiple: res.rMultiple,
-              bars_held: res.barsHeld,
-              notes: res.status === "EXPIRED" ? "time expiry" : null,
-            })
-            .eq("id", o.id)
-            .eq("status", "OPEN");
-          if (!upErr) closed++;
-        }
-      } catch (e) {
-        console.error(`evaluate reverse ${key}:`, e instanceof Error ? e.message : String(e));
-      }
-    },
-    t0 + EVAL_BUDGET_MS,
-  );
-
-  return { checked: open.length, closed };
+  console.log(`reverse evaluate checked=${checked} closed=${closed}`);
+  return { checked, closed };
 }
 
 // ---------------------------------------------------------------------
@@ -813,9 +878,10 @@ Deno.serve(async (req: Request) => {
 
     // ---------------- 4b. Reverse Signal Lab ----------------
     try {
-      await backfillReverseOutcomes(supabase);
-      await syncReverseCancellations(supabase);
-      await evaluateOpenReverseOutcomes(supabase, t0);
+      const bf = await backfillReverseOutcomes(supabase);
+      const cn = await syncReverseCancellations(supabase);
+      const rev = await evaluateOpenReverseOutcomes(supabase, t0);
+      console.log(`reverse lab: backfill=${bf} cancelled=${cn} closed=${rev.closed}/${rev.checked}`);
     } catch (e) {
       console.error("reverse lab:", e instanceof Error ? e.message : String(e));
       if (errors.length < 5) {
