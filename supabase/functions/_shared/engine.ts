@@ -1084,13 +1084,13 @@ export function resolveTrade(
 // Reverse Signal Lab (آزمایشگاه سیگنال معکوس)
 // =====================================================================
 //
-// Every signal registered in Signal Lab (auto scan AND manual tracking) gets ONE reverse paper trade:
-//   - direction flips            BUY -> SELL (short) · SELL -> BUY (long)
-//   - same entry                 (close of the signal candle)
-//   - stop-loss  = the ORIGINAL take-profit   (the level the original wanted to reach)
-//   - take-profit = the ORIGINAL stop-loss    (the level the original was afraid of)
-// It is then resolved by the very same `resolveTrade` (stop checked first, gaps exit at the open,
-// same cost, same expiry), so the two labs are directly comparable.
+// Every Signal Lab trade gets ONE reverse paper trade:
+//   - direction flips (BUY -> SELL, SELL -> BUY)
+//   - same entry
+//   - SAME risk distance as the original stop
+//   - SAME reward distance as the original target
+//   => R/R is preserved (minRiskReward geometry stays), only the side flips.
+// Resolved with the same resolveTrade (stop first, gaps, fees, expiry).
 
 export type OutcomeSide = 'BUY' | 'SELL';
 
@@ -1119,7 +1119,7 @@ export interface ReversePlan {
   entry: number;
   stop: number;
   target: number;
-  /** reward / risk of the reverse trade (= original risk / original reward). */
+  /** reward / risk — same as original (distances preserved, side flipped). */
   riskReward: number;
 }
 
@@ -1127,6 +1127,11 @@ export function oppositeSide(side: OutcomeSide): OutcomeSide {
   return side === 'BUY' ? 'SELL' : 'BUY';
 }
 
+/**
+ * Pure geometry of the reverse trade.
+ * Preserves original risk & reward distances; only flips direction.
+ * Returns null when the original levels are not a valid plan.
+ */
 export function reversePlan(origin: {
   signalType: OutcomeSide;
   entry: number;
@@ -1137,7 +1142,7 @@ export function reversePlan(origin: {
   if (![entry, stop, target].every((v) => Number.isFinite(v) && v > 0)) return null;
 
   const valid =
-    signalType === "BUY"
+    signalType === 'BUY'
       ? stop < entry && entry < target
       : target < entry && entry < stop;
   if (!valid) return null;
@@ -1147,36 +1152,36 @@ export function reversePlan(origin: {
   if (originalRisk <= 0 || originalReward <= 0) return null;
 
   const side = oppositeSide(signalType);
+  const riskReward = originalReward / originalRisk;
 
-  // همان فاصلهٔ ریسک/سود اصلی، فقط جهت برعکس — R/R حفظ می‌شود
-  if (side === "BUY") {
+  if (side === 'BUY') {
     const revStop = entry - originalRisk;
     const revTarget = entry + originalReward;
-    if (revStop <= 0) return null;
+    if (!(revStop > 0)) return null;
     return {
       signalType: side,
-      direction: "LONG",
+      direction: 'LONG',
       entry,
       stop: revStop,
       target: revTarget,
-      riskReward: originalReward / originalRisk,
+      riskReward,
     };
   }
 
   const revStop = entry + originalRisk;
   const revTarget = entry - originalReward;
-  if (revTarget <= 0) return null;
+  if (!(revTarget > 0)) return null;
   return {
     signalType: side,
-    direction: "SHORT",
+    direction: 'SHORT',
     entry,
     stop: revStop,
     target: revTarget,
-    riskReward: originalReward / originalRisk,
+    riskReward,
   };
 }
 
-/** Row to insert into `reverse_signal_outcomes` for a given original outcome (null if the origin is unusable). */
+/** Row to insert into `reverse_signal_outcomes` for a given original outcome (null if unusable). */
 export function buildReverseOutcomeRow(origin: OriginOutcome): Record<string, unknown> | null {
   const plan = reversePlan({
     signalType: origin.signal_type,
