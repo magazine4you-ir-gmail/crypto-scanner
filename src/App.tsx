@@ -20,6 +20,7 @@ import { LoadingSpinner } from '@/components/UI';
 import type { ReactNode } from 'react';
 import { SignalLabPage } from '@/pages/SignalLabPage';
 import { ScalpPage } from '@/pages/ScalpPage';
+import { ReverseLabPage } from '@/pages/ReverseLabPage';
 
 function AppRoute({ children }: { children: ReactNode }) {
   const { loading } = useAuth();
@@ -69,6 +70,7 @@ function AppRoutes() {
       <Route path="/settings" element={<AppRoute><SettingsPage /></AppRoute>} />
       <Route path="/profile" element={<AppRoute><ProfilePage /></AppRoute>} />
       <Route path="/signal-lab" element={<AppRoute><SignalLabPage /></AppRoute>} />
+      <Route path="/reverse-lab" element={<AppRoute><ReverseLabPage /></AppRoute>} />
       <Route path="/scalp" element={<AppRoute><ScalpPage /></AppRoute>} />
 
       <Route path="*" element={<Navigate to="/" replace />} />
