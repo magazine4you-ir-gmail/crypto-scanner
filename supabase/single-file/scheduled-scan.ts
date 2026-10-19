@@ -11,7 +11,10 @@
 //   3. Upserts the latest result per (symbol, timeframe) into `scan_results`.
 //   4. Signal Lab (paper trading):
 //        a. resolves OPEN outcomes (WIN / LOSS / EXPIRED) from CLOSED candles, after fees,
-//        b. registers NEW BUY/SELL signals exactly once per signal candle.
+//        b. registers NEW BUY/SELL signals exactly once per signal candle,
+//        c. Reverse Signal Lab: every registered signal gets ONE mirrored trade (direction flipped, stop <-> target
+//           swapped, see `buildReverseOutcomeRow` in the engine). Missing mirrors are back-filled, mirrors of
+//           cancelled signals are cancelled, and OPEN mirrors are resolved in the same candle pass as the originals.
 //   5. Housekeeping.
 //
 // Auth: header  x-cron-secret: <CRON_SECRET>   (deploy with --no-verify-jwt, see config.toml)
@@ -1104,6 +1107,107 @@ function resolveTrade(
   return null;
 }
 
+// =====================================================================
+// Reverse Signal Lab (آزمایشگاه سیگنال معکوس)
+// =====================================================================
+//
+// Every signal registered in Signal Lab (auto scan AND manual tracking) gets ONE reverse paper trade:
+//   - direction flips            BUY -> SELL (short) · SELL -> BUY (long)
+//   - same entry                 (close of the signal candle)
+//   - stop-loss  = the ORIGINAL take-profit   (the level the original wanted to reach)
+//   - take-profit = the ORIGINAL stop-loss    (the level the original was afraid of)
+// It is then resolved by the very same `resolveTrade` (stop checked first, gaps exit at the open,
+// same cost, same expiry), so the two labs are directly comparable.
+
+type OutcomeSide = 'BUY' | 'SELL';
+
+/** The columns of a `signal_outcomes` row that the reverse trade is derived from. */
+interface OriginOutcome {
+  id: string;
+  symbol: string;
+  base_asset: string;
+  timeframe: string;
+  signal_type: OutcomeSide;
+  score: number;
+  price_at_signal: number;
+  entry_low: number | null;
+  entry_high: number | null;
+  stop_loss: number;
+  target1: number;
+  signal_at: string;
+  candle_close_time: string | null;
+  source: string;
+  tracked_by: string | null;
+}
+
+interface ReversePlan {
+  signalType: OutcomeSide;
+  direction: Direction;
+  entry: number;
+  stop: number;
+  target: number;
+  /** reward / risk of the reverse trade (= original risk / original reward). */
+  riskReward: number;
+}
+
+function oppositeSide(side: OutcomeSide): OutcomeSide {
+  return side === 'BUY' ? 'SELL' : 'BUY';
+}
+
+/**
+ * Pure geometry of the reverse trade. Returns null when the original levels are not a valid plan
+ * (BUY needs stop < entry < target, SELL needs target < entry < stop) so a corrupt row never creates a trade.
+ */
+function reversePlan(origin: { signalType: OutcomeSide; entry: number; stop: number; target: number }): ReversePlan | null {
+  const { signalType, entry, stop, target } = origin;
+  if (![entry, stop, target].every((v) => Number.isFinite(v) && v > 0)) return null;
+  const valid = signalType === 'BUY' ? stop < entry && entry < target : target < entry && entry < stop;
+  if (!valid) return null;
+
+  const originalRisk = Math.abs(entry - stop);
+  const originalReward = Math.abs(target - entry);
+  const side = oppositeSide(signalType);
+  return {
+    signalType: side,
+    direction: side === 'BUY' ? 'LONG' : 'SHORT',
+    entry,
+    stop: target,
+    target: stop,
+    riskReward: originalRisk / originalReward,
+  };
+}
+
+/** Row to insert into `reverse_signal_outcomes` for a given original outcome (null if the origin is unusable). */
+function buildReverseOutcomeRow(origin: OriginOutcome): Record<string, unknown> | null {
+  const plan = reversePlan({
+    signalType: origin.signal_type,
+    entry: Number(origin.price_at_signal),
+    stop: Number(origin.stop_loss),
+    target: Number(origin.target1),
+  });
+  if (!plan) return null;
+  return {
+    origin_outcome_id: origin.id,
+    symbol: origin.symbol,
+    base_asset: origin.base_asset,
+    timeframe: origin.timeframe,
+    signal_type: plan.signalType,
+    origin_signal_type: origin.signal_type,
+    score: origin.score,
+    price_at_signal: plan.entry,
+    entry_low: origin.entry_low,
+    entry_high: origin.entry_high,
+    stop_loss: plan.stop,
+    target1: plan.target,
+    risk_reward: plan.riskReward,
+    signal_at: origin.signal_at,
+    candle_close_time: origin.candle_close_time,
+    status: 'OPEN',
+    source: origin.source,
+    tracked_by: origin.tracked_by,
+  };
+}
+
 // ===== end of inlined engine =====
 
 
@@ -1354,24 +1458,47 @@ interface ScanRow extends Record<string, unknown> {
 // ---------------------------------------------------------------------
 // Signal Lab
 // ---------------------------------------------------------------------
+type OutcomeTable = "signal_outcomes" | "reverse_signal_outcomes";
+
 interface OutcomeRow {
   id: string;
   symbol: string;
   timeframe: string;
+  /** For `reverse_signal_outcomes` this is already the direction of the REVERSE trade. */
   signal_type: "BUY" | "SELL";
   price_at_signal: number;
   stop_loss: number;
   target1: number;
   signal_at: string;
   candle_close_time: string | null;
+  table: OutcomeTable;
 }
 
-/** Resolves OPEN outcomes using CLOSED candles that come after the signal candle. */
-async function evaluateOpenOutcomes(supabase: SupabaseClient, t0: number): Promise<{ checked: number; closed: number }> {
-  const { data, error } = await supabase.from("signal_outcomes").select("*").eq("status", "OPEN").limit(1000);
-  if (error) throw new Error(`load open outcomes: ${error.message}`);
-  const open = (data ?? []) as OutcomeRow[];
-  if (open.length === 0) return { checked: 0, closed: 0 };
+async function loadOpenOutcomes(supabase: SupabaseClient, table: OutcomeTable): Promise<OutcomeRow[]> {
+  const { data, error } = await supabase.from(table).select("*").eq("status", "OPEN").limit(1000);
+  if (error) throw new Error(`load open ${table}: ${error.message}`);
+  return ((data ?? []) as Omit<OutcomeRow, "table">[]).map((o) => ({ ...o, table }));
+}
+
+/**
+ * Resolves OPEN outcomes using CLOSED candles that come after the signal candle.
+ * Originals (`signal_outcomes`) and their reverse mirrors (`reverse_signal_outcomes`) are resolved in ONE pass:
+ * the candles of a (symbol, timeframe) are downloaded once and used for both tables.
+ */
+async function evaluateOpenOutcomes(
+  supabase: SupabaseClient,
+  t0: number,
+): Promise<{ checked: number; closed: number; reverseClosed: number }> {
+  const original = await loadOpenOutcomes(supabase, "signal_outcomes");
+  let reverse: OutcomeRow[] = [];
+  try {
+    reverse = await loadOpenOutcomes(supabase, "reverse_signal_outcomes");
+  } catch (e) {
+    // e.g. the reverse-lab migration is not applied yet: the original Signal Lab must keep working
+    console.error("reverse lab:", e instanceof Error ? e.message : String(e));
+  }
+  const open = [...original, ...reverse];
+  if (open.length === 0) return { checked: 0, closed: 0, reverseClosed: 0 };
 
   const baseTs = (o: OutcomeRow) => Date.parse(o.candle_close_time ?? o.signal_at);
   const groups = new Map<string, OutcomeRow[]>();
@@ -1383,6 +1510,7 @@ async function evaluateOpenOutcomes(supabase: SupabaseClient, t0: number): Promi
   }
 
   let closed = 0;
+  let reverseClosed = 0;
   await mapPool([...groups.entries()], CONCURRENCY, async ([key, outcomes]) => {
     const [symbol, tf] = key.split("|");
     try {
@@ -1406,7 +1534,7 @@ async function evaluateOpenOutcomes(supabase: SupabaseClient, t0: number): Promi
         );
         if (!res) continue;
         const { error: upErr } = await supabase
-          .from("signal_outcomes")
+          .from(o.table)
           .update({
             status: res.status,
             exit_price: res.exitPrice,
@@ -1419,14 +1547,17 @@ async function evaluateOpenOutcomes(supabase: SupabaseClient, t0: number): Promi
           })
           .eq("id", o.id)
           .eq("status", "OPEN");
-        if (!upErr) closed++;
+        if (!upErr) {
+          if (o.table === "signal_outcomes") closed++;
+          else reverseClosed++;
+        }
       }
     } catch (e) {
       console.error(`evaluate ${key}:`, e instanceof Error ? e.message : String(e));
     }
   }, t0 + EVAL_BUDGET_MS);
 
-  return { checked: open.length, closed };
+  return { checked: open.length, closed, reverseClosed };
 }
 
 /** Registers a paper trade ONLY when the signal is new (first scan where the type flipped to BUY/SELL). */
@@ -1489,6 +1620,86 @@ async function registerNewOutcomes(supabase: SupabaseClient, fresh: ScanRow[], n
     else inserted += count ?? chunk.length;
   }
   return inserted;
+}
+
+/** Reads every row of a query, page by page (PostgREST returns at most 1000 rows per request). */
+async function selectAll<T>(
+  page: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: { message: string } | null }>,
+  maxRows = 10_000,
+): Promise<T[]> {
+  const out: T[] = [];
+  for (let from = 0; from < maxRows; from += 1000) {
+    const { data, error } = await page(from, from + 999);
+    if (error) throw new Error(error.message);
+    out.push(...(data ?? []));
+    if (!data || data.length < 1000) break;
+  }
+  return out;
+}
+
+/**
+ * Reverse Signal Lab bookkeeping (idempotent, safe to run every hour):
+ *  1. every original outcome (auto scan + manual tracking) that has no mirror yet gets one,
+ *  2. an OPEN mirror whose original was CANCELLED (opposite signal) is cancelled too.
+ */
+async function syncReverseOutcomes(supabase: SupabaseClient, nowIso: string): Promise<{ created: number; cancelled: number }> {
+  const origins = await selectAll<OriginOutcome>((from, to) =>
+    supabase
+      .from("signal_outcomes")
+      .select("id, symbol, base_asset, timeframe, signal_type, score, price_at_signal, entry_low, entry_high, stop_loss, target1, signal_at, candle_close_time, source, tracked_by")
+      .neq("status", "CANCELLED")
+      .order("signal_at", { ascending: false })
+      .order("id")
+      .range(from, to),
+  );
+  const have = new Set(
+    (
+      await selectAll<{ origin_outcome_id: string }>((from, to) =>
+        supabase.from("reverse_signal_outcomes").select("origin_outcome_id").order("id").range(from, to),
+      )
+    ).map((r) => r.origin_outcome_id),
+  );
+
+  const toInsert: Record<string, unknown>[] = [];
+  for (const o of origins) {
+    if (have.has(o.id)) continue;
+    const row = buildReverseOutcomeRow(o);
+    if (row) toInsert.push(row);
+  }
+
+  let created = 0;
+  for (let i = 0; i < toInsert.length; i += 100) {
+    const chunk = toInsert.slice(i, i + 100);
+    const { error, count } = await supabase
+      .from("reverse_signal_outcomes")
+      .upsert(chunk, { onConflict: "origin_outcome_id", ignoreDuplicates: true, count: "exact" });
+    if (error) console.error("reverse_signal_outcomes insert:", error.message);
+    else created += count ?? chunk.length;
+  }
+
+  let cancelled = 0;
+  const { data: openMirrors, error: openErr } = await supabase
+    .from("reverse_signal_outcomes")
+    .select("id, origin:signal_outcomes!origin_outcome_id(status)")
+    .eq("status", "OPEN")
+    .limit(1000);
+  if (openErr) throw new Error(`load open mirrors: ${openErr.message}`);
+  const dead: string[] = [];
+  for (const m of (openMirrors ?? []) as { id: string; origin: { status: string } | { status: string }[] | null }[]) {
+    const origin = Array.isArray(m.origin) ? m.origin[0] : m.origin;
+    if (origin?.status === "CANCELLED") dead.push(m.id);
+  }
+  if (dead.length > 0) {
+    const { error, count } = await supabase
+      .from("reverse_signal_outcomes")
+      .update({ status: "CANCELLED", exit_at: nowIso, notes: "original signal cancelled" }, { count: "exact" })
+      .in("id", dead)
+      .eq("status", "OPEN");
+    if (error) console.error("cancel mirrors:", error.message);
+    else cancelled = count ?? dead.length;
+  }
+
+  return { created, cancelled };
 }
 
 // ---------------------------------------------------------------------
@@ -1636,12 +1847,25 @@ Deno.serve(async (req: Request) => {
     // ---------------- 4. Signal Lab ----------------
     let outcomesClosed = 0;
     let outcomesOpened = 0;
+    let reverseOpened = 0;
+    let reverseClosed = 0;
+    let reverseCancelled = 0;
     try {
       const ev = await evaluateOpenOutcomes(supabase, t0);
       outcomesClosed = ev.closed;
+      reverseClosed = ev.reverseClosed;
       // never register a signal whose candle is already older than two candle periods
       const recent = freshActionable.filter((r) => t0 - Date.parse(r.candle_close_time) <= 2 * timeframeMs(r.timeframe));
       outcomesOpened = await registerNewOutcomes(supabase, recent, nowIso);
+
+      // Reverse Signal Lab: its own try/catch, a failure here never affects the original lab
+      try {
+        const sync = await syncReverseOutcomes(supabase, nowIso);
+        reverseOpened = sync.created;
+        reverseCancelled = sync.cancelled;
+      } catch (e) {
+        console.error("reverse lab sync:", e instanceof Error ? e.message : String(e));
+      }
     } catch (e) {
       console.error("signal lab:", e instanceof Error ? e.message : String(e));
       if (errors.length < 5) errors.push(`signal lab: ${e instanceof Error ? e.message : String(e)}`);
@@ -1702,6 +1926,9 @@ Deno.serve(async (req: Request) => {
       wait: count("WAIT"),
       outcomes_opened: outcomesOpened,
       outcomes_closed: outcomesClosed,
+      reverse_opened: reverseOpened,
+      reverse_closed: reverseClosed,
+      reverse_cancelled: reverseCancelled,
       duration_ms: Date.now() - t0,
       sample_errors: errors,
     });
