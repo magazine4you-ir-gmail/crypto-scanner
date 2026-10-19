@@ -7,6 +7,10 @@
 //
 // POST  Authorization: Bearer <user access token>   body: { "symbol": "SOLUSDT" | "SOLBTC", "timeframe": "1h" }
 // Deploy with --no-verify-jwt (the token is verified inside, see below).
+//
+// Reverse Signal Lab: right after the manual signal is registered, its mirrored trade (direction flipped,
+// stop <-> target swapped) is registered too. This is best effort: if it fails, the hourly `scheduled-scan`
+// back-fills the missing mirror, so a manual track never fails because of the reverse lab.
 
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "npm:@supabase/supabase-js@2.57.4";
@@ -1094,6 +1098,107 @@ function resolveTrade(
   return null;
 }
 
+// =====================================================================
+// Reverse Signal Lab (آزمایشگاه سیگنال معکوس)
+// =====================================================================
+//
+// Every signal registered in Signal Lab (auto scan AND manual tracking) gets ONE reverse paper trade:
+//   - direction flips            BUY -> SELL (short) · SELL -> BUY (long)
+//   - same entry                 (close of the signal candle)
+//   - stop-loss  = the ORIGINAL take-profit   (the level the original wanted to reach)
+//   - take-profit = the ORIGINAL stop-loss    (the level the original was afraid of)
+// It is then resolved by the very same `resolveTrade` (stop checked first, gaps exit at the open,
+// same cost, same expiry), so the two labs are directly comparable.
+
+type OutcomeSide = 'BUY' | 'SELL';
+
+/** The columns of a `signal_outcomes` row that the reverse trade is derived from. */
+interface OriginOutcome {
+  id: string;
+  symbol: string;
+  base_asset: string;
+  timeframe: string;
+  signal_type: OutcomeSide;
+  score: number;
+  price_at_signal: number;
+  entry_low: number | null;
+  entry_high: number | null;
+  stop_loss: number;
+  target1: number;
+  signal_at: string;
+  candle_close_time: string | null;
+  source: string;
+  tracked_by: string | null;
+}
+
+interface ReversePlan {
+  signalType: OutcomeSide;
+  direction: Direction;
+  entry: number;
+  stop: number;
+  target: number;
+  /** reward / risk of the reverse trade (= original risk / original reward). */
+  riskReward: number;
+}
+
+function oppositeSide(side: OutcomeSide): OutcomeSide {
+  return side === 'BUY' ? 'SELL' : 'BUY';
+}
+
+/**
+ * Pure geometry of the reverse trade. Returns null when the original levels are not a valid plan
+ * (BUY needs stop < entry < target, SELL needs target < entry < stop) so a corrupt row never creates a trade.
+ */
+function reversePlan(origin: { signalType: OutcomeSide; entry: number; stop: number; target: number }): ReversePlan | null {
+  const { signalType, entry, stop, target } = origin;
+  if (![entry, stop, target].every((v) => Number.isFinite(v) && v > 0)) return null;
+  const valid = signalType === 'BUY' ? stop < entry && entry < target : target < entry && entry < stop;
+  if (!valid) return null;
+
+  const originalRisk = Math.abs(entry - stop);
+  const originalReward = Math.abs(target - entry);
+  const side = oppositeSide(signalType);
+  return {
+    signalType: side,
+    direction: side === 'BUY' ? 'LONG' : 'SHORT',
+    entry,
+    stop: target,
+    target: stop,
+    riskReward: originalRisk / originalReward,
+  };
+}
+
+/** Row to insert into `reverse_signal_outcomes` for a given original outcome (null if the origin is unusable). */
+function buildReverseOutcomeRow(origin: OriginOutcome): Record<string, unknown> | null {
+  const plan = reversePlan({
+    signalType: origin.signal_type,
+    entry: Number(origin.price_at_signal),
+    stop: Number(origin.stop_loss),
+    target: Number(origin.target1),
+  });
+  if (!plan) return null;
+  return {
+    origin_outcome_id: origin.id,
+    symbol: origin.symbol,
+    base_asset: origin.base_asset,
+    timeframe: origin.timeframe,
+    signal_type: plan.signalType,
+    origin_signal_type: origin.signal_type,
+    score: origin.score,
+    price_at_signal: plan.entry,
+    entry_low: origin.entry_low,
+    entry_high: origin.entry_high,
+    stop_loss: plan.stop,
+    target1: plan.target,
+    risk_reward: plan.riskReward,
+    signal_at: origin.signal_at,
+    candle_close_time: origin.candle_close_time,
+    status: 'OPEN',
+    source: origin.source,
+    tracked_by: origin.tracked_by,
+  };
+}
+
 // ===== end of inlined engine =====
 
 
@@ -1205,6 +1310,7 @@ Deno.serve(async (req: Request) => {
 
   // --- register ---
   const p = a.risk;
+  const signalAtIso = new Date().toISOString();
   const { data: inserted, error } = await supabase
     .from("signal_outcomes")
     .insert({
@@ -1220,7 +1326,7 @@ Deno.serve(async (req: Request) => {
       target1: p.target1,
       target2: p.target2,
       risk_reward: p.riskReward,
-      signal_at: new Date().toISOString(),
+      signal_at: signalAtIso,
       candle_close_time: closeIso,
       status: "OPEN",
       source: "manual_track",
@@ -1234,5 +1340,35 @@ Deno.serve(async (req: Request) => {
     if (error.code === "23505") return json({ ok: true, already: true, signal_type: a.signalType, score: a.score });
     return json({ ok: false, reason: "server_error" }, 500);
   }
+
+  // --- reverse mirror (best effort, idempotent: unique index on origin_outcome_id) ---
+  try {
+    const mirror = buildReverseOutcomeRow({
+      id: inserted.id as string,
+      symbol,
+      base_asset: splitSymbol(symbol)?.base ?? symbol,
+      timeframe,
+      signal_type: a.signalType,
+      score: a.score,
+      price_at_signal: a.price,
+      entry_low: p.entryLow,
+      entry_high: p.entryHigh,
+      stop_loss: p.stopLoss,
+      target1: p.target1,
+      signal_at: signalAtIso,
+      candle_close_time: closeIso,
+      source: "manual_track",
+      tracked_by: userId,
+    });
+    if (mirror) {
+      const { error: mirrorError } = await supabase
+        .from("reverse_signal_outcomes")
+        .upsert(mirror, { onConflict: "origin_outcome_id", ignoreDuplicates: true });
+      if (mirrorError) console.error("reverse mirror:", mirrorError.message);
+    }
+  } catch (e) {
+    console.error("reverse mirror:", e instanceof Error ? e.message : String(e));
+  }
+
   return json({ ok: true, already: false, id: inserted.id, signal_type: a.signalType, score: a.score, price: a.price, stop_loss: p.stopLoss, target1: p.target1 });
 });
