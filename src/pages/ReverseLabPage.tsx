@@ -29,7 +29,7 @@ export function ReverseLabPage() {
   const [tab, setTab] = useState<Tab>('ALL');
   const [tf, setTf] = useState('ALL');
   const [dir, setDir] = useState<Dir>('ALL');
-  const [source, setSource] = useState<Source>('auto_scan');
+  const [source, setSource] = useState<Source>('ALL');
 
   const load = useCallback(async () => {
     setLoading(true);
