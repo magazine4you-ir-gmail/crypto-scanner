@@ -127,8 +127,8 @@ export const DEFAULT_RISK_CONFIG: RiskConfig = {
   minRiskReward: 2,
   riskPercent: 1,
   capital: 10000,
-  atrMultiplier: 5,
-  minStopAtr: 0.8,
+  atrMultiplier: 1.5,
+  minStopAtr: 2,
   maxPositionPct: 100,
 };
 
