@@ -22,6 +22,7 @@ import {
   Zap,
 } from 'lucide-react';
 import { useState } from 'react';
+import { FuturesCalculatorButton } from '@/components/FuturesCalculator';
 
 const navItems = [
   { key: 'dashboard', path: '/', icon: LayoutDashboard },
@@ -212,6 +213,8 @@ export function Layout({ children }: { children: React.ReactNode }) {
           </button>
         </div>
       </nav>
+
+      <FuturesCalculatorButton />
     </div>
   );
 }
