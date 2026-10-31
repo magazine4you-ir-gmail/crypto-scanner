@@ -25,7 +25,7 @@ export function ReverseLabPage() {
   const [rows, setRows] = useState<ReverseOutcome[]>([]);
   const [run, setRun] = useState<ScanRunRow | null>(null);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useseState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const [tab, setTab] = useState<Tab>('ALL');
   const [tf, setTf] = useState('ALL');
   const [dir, setDir] = useState<Dir>('ALL');
