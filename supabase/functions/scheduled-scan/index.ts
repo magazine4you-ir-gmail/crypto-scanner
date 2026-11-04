@@ -37,7 +37,7 @@ import {
 // Settings
 // ---------------------------------------------------------------------
 const TIMEFRAMES = ["1h", "4h", "1d"];
-const TOP_N = 100;
+const TOP_N = 200;
 const BTC_TOP_N = 50;
 const CANDLE_LIMIT = 300;
 const CONCURRENCY = 8;
