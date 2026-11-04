@@ -7,9 +7,11 @@ import {
   LineSeries,
   type IChartApi,
   type ISeriesApi,
+  type IPriceLine,
+  type UTCTimestamp,
+  type LineStyle,
 } from 'lightweight-charts';
 import type { Candle } from '@/types/market';
-import type { UTCTimestamp, LineStyle } from 'lightweight-charts';
 import { ema } from '@/engine/indicators/movingAverage';
 import { vwap } from '@/engine/indicators/vwap';
 import { bollingerBands } from '@/engine/indicators/bollinger';
@@ -47,6 +49,8 @@ export function PriceChart({
   const chartRef = useRef<IChartApi | null>(null);
   const candleSeriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null);
   const volumeSeriesRef = useRef<ISeriesApi<'Histogram'> | null>(null);
+  const priceLinesRef = useRef<IPriceLine[]>([]);
+  const overlaySeriesRef = useRef<ISeriesApi<'Line'>[]>([]);
 
   useEffect(() => {
     if (!chartContainerRef.current || chartRef.current) return;
@@ -106,6 +110,8 @@ export function PriceChart({
       chartRef.current = null;
       candleSeriesRef.current = null;
       volumeSeriesRef.current = null;
+      priceLinesRef.current = [];
+      overlaySeriesRef.current = [];
     };
   }, [showVolume]);
 
@@ -115,6 +121,26 @@ export function PriceChart({
     const chart = chartRef.current;
     const candleSeries = candleSeriesRef.current;
 
+    // Clear previous price lines (Entry / Stop / Targets / S-R)
+    for (const line of priceLinesRef.current) {
+      try {
+        candleSeries.removePriceLine(line);
+      } catch {
+        /* already removed */
+      }
+    }
+    priceLinesRef.current = [];
+
+    // Clear previous overlay series (EMA / VWAP / BB)
+    for (const s of overlaySeriesRef.current) {
+      try {
+        chart.removeSeries(s);
+      } catch {
+        /* already removed */
+      }
+    }
+    overlaySeriesRef.current = [];
+
     const candleData = candles.map((c) => ({
       time: (c.openTime / 1000) as UTCTimestamp,
       open: c.open,
@@ -122,23 +148,25 @@ export function PriceChart({
       low: c.low,
       close: c.close,
     }));
-
     candleSeries.setData(candleData);
 
     if (volumeSeriesRef.current && showVolume) {
-      const volumeData = candles.map((c) => ({
-        time: (c.openTime / 1000) as UTCTimestamp,
-        value: c.volume,
-        color: c.close >= c.open ? 'rgba(16, 185, 129, 0.3)' : 'rgba(239, 68, 68, 0.3)',
-      }));
-      volumeSeriesRef.current.setData(volumeData);
+      volumeSeriesRef.current.setData(
+        candles.map((c) => ({
+          time: (c.openTime / 1000) as UTCTimestamp,
+          value: c.volume,
+          color: c.close >= c.open ? 'rgba(16, 185, 129, 0.3)' : 'rgba(239, 68, 68, 0.3)',
+        })),
+      );
     }
 
     const closes = candles.map((c) => c.close);
 
     const addLine = (values: (number | null)[], color: string, lineStyle?: number) => {
       const data = values
-        .map((v, i) => (v !== null ? { time: (candles[i].openTime / 1000) as UTCTimestamp, value: v } : null))
+        .map((v, i) =>
+          v !== null ? { time: (candles[i].openTime / 1000) as UTCTimestamp, value: v } : null,
+        )
         .filter((x): x is { time: UTCTimestamp; value: number } => x !== null);
       const series = chart.addSeries(LineSeries, {
         color,
@@ -148,6 +176,7 @@ export function PriceChart({
         lastValueVisible: false,
       });
       series.setData(data);
+      overlaySeriesRef.current.push(series);
     };
 
     if (showEMA20) addLine(ema(closes, 20), '#3b82f6');
@@ -160,26 +189,77 @@ export function PriceChart({
       addLine(bb.lower, 'rgba(139, 92, 246, 0.5)');
     }
 
-    if (entryLevel) {
-      candleSeries.createPriceLine({ price: entryLevel, color: '#3b82f6', lineWidth: 2, lineStyle: 0, axisLabelVisible: true, title: 'Entry' });
-    }
-    if (stopLevel) {
-      candleSeries.createPriceLine({ price: stopLevel, color: '#ef4444', lineWidth: 2, lineStyle: 2, axisLabelVisible: true, title: 'Stop' });
-    }
-    if (targetLevels) {
-      targetLevels.forEach((tgt, i) => {
-        candleSeries.createPriceLine({ price: tgt, color: '#10b981', lineWidth: 1, lineStyle: 1, axisLabelVisible: true, title: `T${i + 1}` });
+    const pushLine = (opts: Parameters<typeof candleSeries.createPriceLine>[0]) => {
+      const line = candleSeries.createPriceLine(opts);
+      priceLinesRef.current.push(line);
+    };
+
+    if (entryLevel != null && Number.isFinite(entryLevel)) {
+      pushLine({
+        price: entryLevel,
+        color: '#3b82f6',
+        lineWidth: 2,
+        lineStyle: 0,
+        axisLabelVisible: true,
+        title: 'Entry',
       });
     }
+    if (stopLevel != null && Number.isFinite(stopLevel)) {
+      pushLine({
+        price: stopLevel,
+        color: '#ef4444',
+        lineWidth: 2,
+        lineStyle: 2,
+        axisLabelVisible: true,
+        title: 'Stop',
+      });
+    }
+    targetLevels?.forEach((tgt, i) => {
+      if (tgt != null && Number.isFinite(tgt)) {
+        pushLine({
+          price: tgt,
+          color: '#10b981',
+          lineWidth: 1,
+          lineStyle: 1,
+          axisLabelVisible: true,
+          title: `T${i + 1}`,
+        });
+      }
+    });
     supportLevels?.forEach((s) => {
-      candleSeries.createPriceLine({ price: s, color: 'rgba(16, 185, 129, 0.3)', lineWidth: 1, lineStyle: 3, axisLabelVisible: false });
+      pushLine({
+        price: s,
+        color: 'rgba(16, 185, 129, 0.3)',
+        lineWidth: 1,
+        lineStyle: 3,
+        axisLabelVisible: false,
+      });
     });
     resistanceLevels?.forEach((r) => {
-      candleSeries.createPriceLine({ price: r, color: 'rgba(239, 68, 68, 0.3)', lineWidth: 1, lineStyle: 3, axisLabelVisible: false });
+      pushLine({
+        price: r,
+        color: 'rgba(239, 68, 68, 0.3)',
+        lineWidth: 1,
+        lineStyle: 3,
+        axisLabelVisible: false,
+      });
     });
 
     chart.timeScale().fitContent();
-  }, [candles, showEMA20, showEMA50, showEMA200, showVWAP, showBollinger, showVolume, entryLevel, stopLevel, targetLevels, supportLevels, resistanceLevels]);
+  }, [
+    candles,
+    showEMA20,
+    showEMA50,
+    showEMA200,
+    showVWAP,
+    showBollinger,
+    showVolume,
+    entryLevel,
+    stopLevel,
+    targetLevels,
+    supportLevels,
+    resistanceLevels,
+  ]);
 
   return <div ref={chartContainerRef} className="w-full h-[400px] sm:h-[500px]" />;
 }
