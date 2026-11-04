@@ -41,7 +41,6 @@ export function ReverseLabPage() {
       ]);
       setRows(data);
       setRun(latest);
-
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -114,7 +113,6 @@ export function ReverseLabPage() {
 
   return (
     <div className="space-y-4 sm:space-y-6">
-      {/* Header — دقیقاً مثل Signal Lab */}
       <div className="flex items-center justify-between gap-3">
         <Header />
         <button
@@ -160,7 +158,6 @@ export function ReverseLabPage() {
         <>
           {stats.totalClosed > 0 && <ComparePanel original={originalStats} reverse={stats} />}
 
-          {/* Stats grid — دقیقاً مثل Signal Lab */}
           <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-4 gap-2 sm:gap-3">
             <Stat label={t('slOpen')} value={formatNumber(stats.open, lang, 0)} />
             <Stat label={t('totalSignals')} value={formatNumber(stats.totalClosed, lang, 0)} />
@@ -222,7 +219,6 @@ export function ReverseLabPage() {
             </div>
           )}
 
-          {/* Filters */}
           <Card className="!p-3 sm:!p-4 space-y-3">
             <PillRow>
               {tabs.map((x) => (
@@ -265,160 +261,71 @@ export function ReverseLabPage() {
           ) : filtered.length === 0 ? (
             <EmptyState message={t('noResults')} />
           ) : (
-            <>
-              {/* ========== MOBILE CARDS (بهبود یافته) ========== */}
-              <div className="md:hidden space-y-2.5">
-                {filtered.map((r) => (
-                  <button
-                    key={r.id}
-                    onClick={() => open(r)}
-                    className="card w-full text-start p-3 space-y-3 active:bg-surface-100"
-                  >
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <span className="text-base font-bold text-slate-100">{r.base_asset}</span>
-                          <QuoteChip quote={quoteOf(r.symbol)} />
-                          <Chip>{r.timeframe}</Chip>
-                          {r.source === 'manual_track' && (
-                            <Chip tone="bg-primary-500/20 text-primary-300">{t('slManualBadge')}</Chip>
-                          )}
-                        </div>
-
-                        {/* Original → Reverse (واضح‌تر) */}
-                        <div className="flex items-center gap-2 mt-1.5 flex-wrap">
-                          <span className="text-xs text-slate-500">{sideLabel(r.origin_signal_type)}</span>
-                          <span className="text-slate-600">→</span>
-                          <span className={r.signal_type === 'BUY' ? 'signal-buy' : 'signal-sell'}>
-                            {sideLabel(r.signal_type)}
-                          </span>
-                          <StatusBadge status={r.status} t={t} />
-                        </div>
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-2.5">
+              {filtered.map((r) => (
+                <button
+                  key={r.id}
+                  onClick={() => open(r)}
+                  className="card w-full text-start p-3 space-y-3 active:bg-surface-100 hover:bg-surface-100/80 transition-colors"
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-base font-bold text-slate-100">{r.base_asset}</span>
+                        <QuoteChip quote={quoteOf(r.symbol)} />
+                        <Chip>{r.timeframe}</Chip>
+                        {r.source === 'manual_track' && (
+                          <Chip tone="bg-primary-500/20 text-primary-300">{t('slManualBadge')}</Chip>
+                        )}
                       </div>
 
-                      <div className="text-end shrink-0">
-                        <ScoreBar score={r.score} />
-                        <PnlText r={r} lang={lang} />
-                      </div>
-                    </div>
-
-                    <div className="grid grid-cols-3 gap-x-3 gap-y-2 rounded-lg bg-surface-100/60 p-2.5">
-                      <Metric label={t('price')} value={formatPrice(Number(r.price_at_signal), lang)} />
-                      <Metric
-                        label={t('stopLoss')}
-                        value={formatPrice(Number(r.stop_loss), lang)}
-                        tone="text-error-400"
-                      />
-                      <Metric
-                        label={t('asTarget')}
-                        value={formatPrice(Number(r.target1), lang)}
-                        tone="text-success-400"
-                      />
-                      <Metric label="R" value={rText(r.r_multiple)} />
-                      <Metric
-                        label={t('rlOriginalResult')}
-                        value={r.origin ? statusLabel(r.origin.status, t) : '—'}
-                      />
-                      <Metric label={t('barsHeld')} value={r.bars_held ?? '—'} />
-                    </div>
-
-                    <div className="border-t border-surface-200 pt-2 flex items-center justify-between gap-2">
-                      <TimeStamp value={r.candle_close_time ?? r.signal_at} label={t('signalTime')} />
-                      {r.exit_at && (
-                        <span className="text-[11px] text-slate-500">
-                          {t('exitTime')}: {formatDate(r.exit_at, lang)}
+                      <div className="flex items-center gap-2 mt-1.5 flex-wrap">
+                        <span className="text-xs text-slate-500">{sideLabel(r.origin_signal_type)}</span>
+                        <span className="text-slate-600">→</span>
+                        <span className={r.signal_type === 'BUY' ? 'signal-buy' : 'signal-sell'}>
+                          {sideLabel(r.signal_type)}
                         </span>
-                      )}
+                        <StatusBadge status={r.status} t={t} />
+                      </div>
                     </div>
-                  </button>
-                ))}
-              </div>
 
-              {/* ========== DESKTOP TABLE (شبیه Signal Lab + ستون‌های reverse) ========== */}
-              <div className="hidden md:block card overflow-hidden">
-                <div className="overflow-x-auto">
-                  <table className="w-full text-sm min-w-[1100px]">
-                    <thead className="bg-surface-100 text-slate-400">
-                      <tr>
-                        {[
-                          t('asset'),
-                          t('timeframe'),
-                          t('rlOriginalSignal'),
-                          t('rlReverseSignal'),
-                          t('score'),
-                          t('price'),
-                          t('stopLoss'),
-                          t('asTarget'),
-                          t('rlOriginalResult'),
-                          t('rlReverseResult'),
-                          'PnL',
-                          'R',
-                          t('signalTime'),
-                          t('exitTime'),
-                        ].map((h) => (
-                          <th key={h} className="px-3 py-3 text-start font-medium whitespace-nowrap">
-                            {h}
-                          </th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-surface-200">
-                      {filtered.map((r) => (
-                        <tr
-                          key={r.id}
-                          className="hover:bg-surface-100 cursor-pointer"
-                          onClick={() => open(r)}
-                        >
-                          <td className="px-3 py-3 font-semibold text-slate-100 whitespace-nowrap">
-                            {r.base_asset} <QuoteChip quote={quoteOf(r.symbol)} />
-                            {r.source === 'manual_track' && (
-                              <span className="ms-2 align-middle">
-                                <Chip tone="bg-primary-500/20 text-primary-300">{t('slManualBadge')}</Chip>
-                              </span>
-                            )}
-                          </td>
-                          <td className="px-3 py-3 text-slate-300 uppercase">{r.timeframe}</td>
-                          <td className="px-3 py-3 text-slate-400">{sideLabel(r.origin_signal_type)}</td>
-                          <td className="px-3 py-3">
-                            <span className={r.signal_type === 'BUY' ? 'signal-buy' : 'signal-sell'}>
-                              {sideLabel(r.signal_type)}
-                            </span>
-                          </td>
-                          <td className="px-3 py-3">
-                            <ScoreBar score={r.score} />
-                          </td>
-                          <td className="px-3 py-3 text-slate-300 tabular-nums whitespace-nowrap">
-                            {formatPrice(Number(r.price_at_signal), lang)}
-                          </td>
-                          <td className="px-3 py-3 text-slate-300 tabular-nums whitespace-nowrap">
-                            {formatPrice(Number(r.stop_loss), lang)}
-                          </td>
-                          <td className="px-3 py-3 text-slate-300 tabular-nums whitespace-nowrap">
-                            {formatPrice(Number(r.target1), lang)}
-                          </td>
-                          <td className="px-3 py-3 text-slate-400 whitespace-nowrap">
-                            {r.origin ? statusLabel(r.origin.status, t) : '—'}
-                          </td>
-                          <td className="px-3 py-3">
-                            <StatusBadge status={r.status} t={t} />
-                          </td>
-                          <td className="px-3 py-3 tabular-nums">
-                            <PnlText r={r} lang={lang} />
-                          </td>
-                          <td className="px-3 py-3 tabular-nums text-slate-300">{rText(r.r_multiple)}</td>
-                          <td className="px-3 py-3">
-                            <TimeStamp value={r.candle_close_time ?? r.signal_at} />
-                          </td>
-                          <td className="px-3 py-3 text-xs text-slate-400 whitespace-nowrap">
-                            {r.exit_at ? formatDate(r.exit_at, lang) : '—'}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            </>
+                    <div className="text-end shrink-0">
+                      <ScoreBar score={r.score} />
+                      <PnlText r={r} lang={lang} />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-3 gap-x-3 gap-y-2 rounded-lg bg-surface-100/60 p-2.5">
+                    <Metric label={t('price')} value={formatPrice(Number(r.price_at_signal), lang)} />
+                    <Metric
+                      label={t('stopLoss')}
+                      value={formatPrice(Number(r.stop_loss), lang)}
+                      tone="text-error-400"
+                    />
+                    <Metric
+                      label={t('asTarget')}
+                      value={formatPrice(Number(r.target1), lang)}
+                      tone="text-success-400"
+                    />
+                    <Metric label="R" value={rText(r.r_multiple)} />
+                    <Metric
+                      label={t('rlOriginalResult')}
+                      value={r.origin ? statusLabel(r.origin.status, t) : '—'}
+                    />
+                    <Metric label={t('barsHeld')} value={r.bars_held ?? '—'} />
+                  </div>
+
+                  <div className="border-t border-surface-200 pt-2 flex items-center justify-between gap-2">
+                    <TimeStamp value={r.candle_close_time ?? r.signal_at} label={t('signalTime')} />
+                    {r.exit_at && (
+                      <span className="text-[11px] text-slate-500 shrink-0">
+                        {t('exitTime')}: {formatDate(r.exit_at, lang)}
+                      </span>
+                    )}
+                  </div>
+                </button>
+              ))}
+            </div>
           )}
 
           <Disclaimer />
@@ -427,8 +334,6 @@ export function ReverseLabPage() {
     </div>
   );
 }
-
-/* ---------- Helper components (کپی از Signal Lab + کمی بهبود) ---------- */
 
 function PnlText({ r, lang }: { r: ReverseOutcome; lang: 'fa' | 'en' }) {
   if (r.pnl_pct == null) return <span className="text-slate-500 text-sm">—</span>;
