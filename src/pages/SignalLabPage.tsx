@@ -54,7 +54,6 @@ export function SignalLabPage() {
     void load();
   }, [authLoading, user, load]);
 
-  // statistics follow the selected source, so auto-scan and manual-tracking numbers are never mixed
   const sourceRows = useMemo(() => rows.filter((r) => source === 'ALL' || r.source === source), [rows, source]);
   const stats = useMemo(() => computeStats(sourceRows), [sourceRows]);
   const timeframes = useMemo(() => Array.from(new Set(sourceRows.map((r) => r.timeframe))).sort(), [sourceRows]);
@@ -76,7 +75,9 @@ export function SignalLabPage() {
         <Header />
         <Card>
           <p className="text-slate-300 text-sm mb-4">{t('asLoginRequired')}</p>
-          <button className="btn-primary text-sm" onClick={() => navigate('/login')}>{t('signIn')}</button>
+          <button className="btn-primary text-sm" onClick={() => navigate('/login')}>
+            {t('signIn')}
+          </button>
         </Card>
       </div>
     );
@@ -89,7 +90,8 @@ export function SignalLabPage() {
     { key: 'LOSS', label: t('loss') },
     { key: 'EXPIRED', label: t('slExpired') },
   ];
-  const open = (r: SignalOutcome) => navigate(`/asset/${r.symbol}?tf=${encodeURIComponent(r.timeframe)}&outcome=${encodeURIComponent(r.id)}`);
+  const open = (r: SignalOutcome) =>
+    navigate(`/asset/${r.symbol}?tf=${encodeURIComponent(r.timeframe)}&outcome=${encodeURIComponent(r.id)}`);
   const lastEval = run?.finished_at ?? run?.started_at ?? null;
 
   return (
@@ -98,7 +100,11 @@ export function SignalLabPage() {
         <Header />
         <div className="flex items-start gap-2 shrink-0">
           <AuditExportButton />
-          <button onClick={() => void load()} className="btn-secondary text-sm inline-flex items-center gap-2 shrink-0" aria-label={t('asRefresh')}>
+          <button
+            onClick={() => void load()}
+            className="btn-secondary text-sm inline-flex items-center gap-2 shrink-0"
+            aria-label={t('asRefresh')}
+          >
             <RefreshCw className="w-4 h-4" />
             <span className="hidden sm:inline">{t('asRefresh')}</span>
           </button>
@@ -108,18 +114,24 @@ export function SignalLabPage() {
       <p className="text-sm text-slate-400 leading-6">{t('slDescription')}</p>
       <p className="text-xs text-slate-500 leading-5">{t('trackNote')}</p>
       <PillRow>
-        {([
-          ['auto_scan', t('slSourceAuto')],
-          ['manual_track', t('slSourceManual')],
-          ['ALL', t('slSourceAll')],
-        ] as [Source, string][]).map(([key, label]) => (
-          <Pill key={key} active={source === key} onClick={() => setSource(key)}>{label}</Pill>
+        {(
+          [
+            ['auto_scan', t('slSourceAuto')],
+            ['manual_track', t('slSourceManual')],
+            ['ALL', t('slSourceAll')],
+          ] as [Source, string][]
+        ).map(([key, label]) => (
+          <Pill key={key} active={source === key} onClick={() => setSource(key)}>
+            {label}
+          </Pill>
         ))}
       </PillRow>
       {lastEval && (
         <p className="text-[11px] text-slate-500">
           {t('lastScanOutcomes')}: {formatDate(lastEval, lang)}
-          {run && run.outcomes_closed != null ? ` · +${formatNumber(run.outcomes_opened ?? 0, lang, 0)} / ✓${formatNumber(run.outcomes_closed, lang, 0)}` : ''}
+          {run && run.outcomes_closed != null
+            ? ` · +${formatNumber(run.outcomes_opened ?? 0, lang, 0)} / ✓${formatNumber(run.outcomes_closed, lang, 0)}`
+            : ''}
         </p>
       )}
 
@@ -137,7 +149,10 @@ export function SignalLabPage() {
               hint={`${t('breakEven')}: ${formatPercent(stats.breakEvenWinRate, lang)}`}
               color={stats.winRate >= stats.breakEvenWinRate ? 'text-success-400' : 'text-error-400'}
             />
-            <Stat label={`${t('win')} / ${t('loss')} / ${t('slExpired')}`} value={`${stats.wins} / ${stats.losses} / ${stats.expired}`} />
+            <Stat
+              label={`${t('win')} / ${t('loss')} / ${t('slExpired')}`}
+              value={`${stats.wins} / ${stats.losses} / ${stats.expired}`}
+            />
             <Stat
               label={t('expectancyR')}
               value={`${stats.expectancyR >= 0 ? '+' : ''}${formatNumber(stats.expectancyR, lang, 2)}R`}
@@ -154,12 +169,18 @@ export function SignalLabPage() {
               value={stats.profitFactor === Infinity ? '∞' : formatNumber(stats.profitFactor, lang, 2)}
               color={stats.profitFactor >= 1 ? 'text-success-400' : 'text-error-400'}
             />
-            <Stat label={t('totalPnl')} value={formatPercent(stats.totalPnl, lang)} color={stats.totalPnl >= 0 ? 'text-success-400' : 'text-error-400'} />
+            <Stat
+              label={t('totalPnl')}
+              value={formatPercent(stats.totalPnl, lang)}
+              color={stats.totalPnl >= 0 ? 'text-success-400' : 'text-error-400'}
+            />
           </div>
 
           {stats.totalClosed > 0 && stats.totalClosed < 30 && (
             <p className="text-xs text-warning-400">
-              {lang === 'fa' ? 'نمونه هنوز کوچک است (کمتر از ۳۰ معامله بسته‌شده)؛ به این آمار تکیه نکنید.' : 'Sample is still small (< 30 closed trades); do not rely on these numbers yet.'}
+              {lang === 'fa'
+                ? 'نمونه هنوز کوچک است (کمتر از ۳۰ معامله بسته‌شده)؛ به این آمار تکیه نکنید.'
+                : 'Sample is still small (< 30 closed trades); do not rely on these numbers yet.'}
             </p>
           )}
 
@@ -167,26 +188,43 @@ export function SignalLabPage() {
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-3 sm:gap-4">
               <BucketCard title={t('slByTimeframe')} data={stats.byTimeframe} order={timeframes} upper />
               <BucketCard title={t('slByScore')} data={stats.byScoreBucket} order={['80+', '70-79', '60-69', '<60']} />
-              <BucketCard title={t('byDirection')} data={stats.byDirection} order={['BUY', 'SELL']} labels={{ BUY: t('buy'), SELL: t('asShort') }} />
+              <BucketCard
+                title={t('byDirection')}
+                data={stats.byDirection}
+                order={['BUY', 'SELL']}
+                labels={{ BUY: t('buy'), SELL: t('asShort') }}
+              />
             </div>
           )}
 
           <Card className="!p-3 sm:!p-4 space-y-3">
             <PillRow>
               {tabs.map((x) => (
-                <Pill key={x.key} active={tab === x.key} onClick={() => setTab(x.key)}>{x.label}</Pill>
+                <Pill key={x.key} active={tab === x.key} onClick={() => setTab(x.key)}>
+                  {x.label}
+                </Pill>
               ))}
             </PillRow>
             <div className="grid grid-cols-2 gap-2 sm:flex sm:justify-end">
-              <select value={dir} onChange={(e) => setDir(e.target.value as Dir)} className="input-field text-sm sm:!w-auto">
-                <option value="ALL">{t('signal')}: {t('all')}</option>
+              <select
+                value={dir}
+                onChange={(e) => setDir(e.target.value as Dir)}
+                className="input-field text-sm sm:!w-auto"
+              >
+                <option value="ALL">
+                  {t('signal')}: {t('all')}
+                </option>
                 <option value="BUY">{t('buy')}</option>
                 <option value="SELL">{t('asShort')}</option>
               </select>
               <select value={tf} onChange={(e) => setTf(e.target.value)} className="input-field text-sm sm:!w-auto">
-                <option value="ALL">{t('timeframe')}: {t('all')}</option>
+                <option value="ALL">
+                  {t('timeframe')}: {t('all')}
+                </option>
                 {timeframes.map((x) => (
-                  <option key={x} value={x}>{x.toUpperCase()}</option>
+                  <option key={x} value={x}>
+                    {x.toUpperCase()}
+                  </option>
                 ))}
               </select>
             </div>
@@ -197,83 +235,56 @@ export function SignalLabPage() {
           ) : filtered.length === 0 ? (
             <EmptyState message={t('noResults')} />
           ) : (
-            <>
-              {/* phones: cards, newest first */}
-              <div className="md:hidden space-y-2.5">
-                {filtered.map((r) => (
-                  <button key={r.id} onClick={() => open(r)} className="card w-full text-start p-3 space-y-3 active:bg-surface-100">
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <span className="text-base font-bold text-slate-100">{r.base_asset}</span>
-                          <QuoteChip quote={quoteOf(r.symbol)} />
-                          <Chip>{r.timeframe}</Chip>
-                          {r.source === 'manual_track' && <Chip tone="bg-primary-500/20 text-primary-300">{t('slManualBadge')}</Chip>}
-                        </div>
-                        <div className="flex items-center gap-2 mt-1.5">
-                          <span className={r.signal_type === 'BUY' ? 'signal-buy' : 'signal-sell'}>{r.signal_type === 'BUY' ? t('buy') : t('asShort')}</span>
-                          <StatusBadge status={r.status} t={t} />
-                        </div>
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-2.5">
+              {filtered.map((r) => (
+                <button
+                  key={r.id}
+                  onClick={() => open(r)}
+                  className="card w-full text-start p-3 space-y-3 active:bg-surface-100 hover:bg-surface-100/80 transition-colors"
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-base font-bold text-slate-100">{r.base_asset}</span>
+                        <QuoteChip quote={quoteOf(r.symbol)} />
+                        <Chip>{r.timeframe}</Chip>
+                        {r.source === 'manual_track' && (
+                          <Chip tone="bg-primary-500/20 text-primary-300">{t('slManualBadge')}</Chip>
+                        )}
                       </div>
-                      <div className="text-end shrink-0">
-                        <ScoreBar score={r.score} />
-                        <PnlText r={r} lang={lang} />
+                      <div className="flex items-center gap-2 mt-1.5">
+                        <span className={r.signal_type === 'BUY' ? 'signal-buy' : 'signal-sell'}>
+                          {r.signal_type === 'BUY' ? t('buy') : t('asShort')}
+                        </span>
+                        <StatusBadge status={r.status} t={t} />
                       </div>
                     </div>
-                    <div className="grid grid-cols-3 gap-x-3 gap-y-2 rounded-lg bg-surface-100/60 p-2.5">
-                      <Metric label={t('price')} value={formatPrice(Number(r.price_at_signal), lang)} />
-                      <Metric label={t('stopLoss')} value={formatPrice(Number(r.stop_loss), lang)} tone="text-error-400" />
-                      <Metric label={t('asTarget')} value={formatPrice(Number(r.target1), lang)} tone="text-success-400" />
-                      <Metric label="R" value={r.r_multiple != null ? `${Number(r.r_multiple) >= 0 ? '+' : ''}${formatNumber(Number(r.r_multiple), lang, 2)}` : '—'} />
-                      <Metric label={t('exitTime')} value={r.exit_at ? formatDate(r.exit_at, lang) : '—'} />
-                      <Metric label={t('barsHeld')} value={r.bars_held ?? '—'} />
+                    <div className="text-end shrink-0">
+                      <ScoreBar score={r.score} />
+                      <PnlText r={r} lang={lang} />
                     </div>
-                    <div className="border-t border-surface-200 pt-2">
-                      <TimeStamp value={r.candle_close_time ?? r.signal_at} label={t('signalTime')} />
-                    </div>
-                  </button>
-                ))}
-              </div>
-
-              <div className="hidden md:block card overflow-hidden">
-                <div className="overflow-x-auto">
-                  <table className="w-full text-sm min-w-[980px]">
-                    <thead className="bg-surface-100 text-slate-400">
-                      <tr>
-                        {[t('asset'), t('timeframe'), t('signal'), t('score'), t('price'), t('stopLoss'), t('asTarget'), t('result'), 'PnL', 'R', t('signalTime'), t('exitTime')].map((h) => (
-                          <th key={h} className="px-3 py-3 text-start font-medium whitespace-nowrap">{h}</th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-surface-200">
-                      {filtered.map((r) => (
-                        <tr key={r.id} className="hover:bg-surface-100 cursor-pointer" onClick={() => open(r)}>
-                          <td className="px-3 py-3 font-semibold text-slate-100 whitespace-nowrap">
-                            {r.base_asset} <QuoteChip quote={quoteOf(r.symbol)} />
-                            {r.source === 'manual_track' && <span className="ms-2 align-middle"><Chip tone="bg-primary-500/20 text-primary-300">{t('slManualBadge')}</Chip></span>}
-                          </td>
-                          <td className="px-3 py-3 text-slate-300 uppercase">{r.timeframe}</td>
-                          <td className="px-3 py-3">
-                            <span className={r.signal_type === 'BUY' ? 'signal-buy' : 'signal-sell'}>{r.signal_type === 'BUY' ? t('buy') : t('asShort')}</span>
-                          </td>
-                          <td className="px-3 py-3"><ScoreBar score={r.score} /></td>
-                          <td className="px-3 py-3 text-slate-300 tabular-nums whitespace-nowrap">{formatPrice(Number(r.price_at_signal), lang)}</td>
-                          <td className="px-3 py-3 text-slate-300 tabular-nums whitespace-nowrap">{formatPrice(Number(r.stop_loss), lang)}</td>
-                          <td className="px-3 py-3 text-slate-300 tabular-nums whitespace-nowrap">{formatPrice(Number(r.target1), lang)}</td>
-                          <td className="px-3 py-3"><StatusBadge status={r.status} t={t} /></td>
-                          <td className="px-3 py-3 tabular-nums"><PnlText r={r} lang={lang} /></td>
-                          <td className="px-3 py-3 tabular-nums text-slate-300">
-                            {r.r_multiple != null ? `${Number(r.r_multiple) >= 0 ? '+' : ''}${formatNumber(Number(r.r_multiple), lang, 2)}` : '—'}
-                          </td>
-                          <td className="px-3 py-3"><TimeStamp value={r.candle_close_time ?? r.signal_at} /></td>
-                          <td className="px-3 py-3 text-xs text-slate-400 whitespace-nowrap">{r.exit_at ? formatDate(r.exit_at, lang) : '—'}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            </>
+                  </div>
+                  <div className="grid grid-cols-3 gap-x-3 gap-y-2 rounded-lg bg-surface-100/60 p-2.5">
+                    <Metric label={t('price')} value={formatPrice(Number(r.price_at_signal), lang)} />
+                    <Metric label={t('stopLoss')} value={formatPrice(Number(r.stop_loss), lang)} tone="text-error-400" />
+                    <Metric label={t('asTarget')} value={formatPrice(Number(r.target1), lang)} tone="text-success-400" />
+                    <Metric
+                      label="R"
+                      value={
+                        r.r_multiple != null
+                          ? `${Number(r.r_multiple) >= 0 ? '+' : ''}${formatNumber(Number(r.r_multiple), lang, 2)}`
+                          : '—'
+                      }
+                    />
+                    <Metric label={t('exitTime')} value={r.exit_at ? formatDate(r.exit_at, lang) : '—'} />
+                    <Metric label={t('barsHeld')} value={r.bars_held ?? '—'} />
+                  </div>
+                  <div className="border-t border-surface-200 pt-2">
+                    <TimeStamp value={r.candle_close_time ?? r.signal_at} label={t('signalTime')} />
+                  </div>
+                </button>
+              ))}
+            </div>
           )}
 
           <Disclaimer />
@@ -286,7 +297,11 @@ export function SignalLabPage() {
 function PnlText({ r, lang }: { r: SignalOutcome; lang: 'fa' | 'en' }) {
   if (r.pnl_pct == null) return <span className="text-slate-500 text-sm">—</span>;
   const v = Number(r.pnl_pct);
-  return <span className={`text-sm font-semibold tabular-nums ${v >= 0 ? 'text-success-400' : 'text-error-400'}`}>{formatPercent(v, lang)}</span>;
+  return (
+    <span className={`text-sm font-semibold tabular-nums ${v >= 0 ? 'text-success-400' : 'text-error-400'}`}>
+      {formatPercent(v, lang)}
+    </span>
+  );
 }
 
 function Header() {
@@ -299,7 +314,17 @@ function Header() {
   );
 }
 
-function Stat({ label, value, hint, color = 'text-slate-100' }: { label: string; value: string; hint?: string; color?: string }) {
+function Stat({
+  label,
+  value,
+  hint,
+  color = 'text-slate-100',
+}: {
+  label: string;
+  value: string;
+  hint?: string;
+  color?: string;
+}) {
   return (
     <Card className="!p-3 sm:!p-4">
       <p className="text-xs text-slate-400 mb-1 truncate">{label}</p>
@@ -336,7 +361,10 @@ function BucketCard({
               <span className={`text-slate-300 ${upper ? 'uppercase' : ''}`}>{labels[k] ?? k}</span>
               <span className="text-slate-400 text-xs sm:text-sm text-end">
                 {v.wins}W / {v.losses}L{v.expired ? ` / ${v.expired}E` : ''} · {formatPercent(v.winRate, lang)} ·{' '}
-                <span className={v.avgR >= 0 ? 'text-success-400' : 'text-error-400'}>{v.avgR >= 0 ? '+' : ''}{formatNumber(v.avgR, lang, 2)}R</span>
+                <span className={v.avgR >= 0 ? 'text-success-400' : 'text-error-400'}>
+                  {v.avgR >= 0 ? '+' : ''}
+                  {formatNumber(v.avgR, lang, 2)}R
+                </span>
               </span>
             </div>
           );
