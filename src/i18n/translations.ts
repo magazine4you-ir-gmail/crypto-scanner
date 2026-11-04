@@ -220,6 +220,7 @@ export const translations: Translations = {
   top20: { fa: '۲۰ برتر', en: 'Top 20' },
   top50: { fa: '۵۰ برتر', en: 'Top 50' },
   top100: { fa: '۱۰۰ برتر', en: 'Top 100' },
+  top200: { fa: '۲۰۰ برتر', en: 'Top 200' },
   custom: { fa: 'سفارشی', en: 'Custom' },
   strong: { fa: 'قوی', en: 'Strong' },
   watch: { fa: 'تحت نظر', en: 'Watch' },
