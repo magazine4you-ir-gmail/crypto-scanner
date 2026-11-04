@@ -29,7 +29,7 @@ import {
   type ManualScanResultRow,
 } from '@/services/manualScanService';
 
-const UNIVERSE_OPTIONS = [10, 20, 50, 100];
+const UNIVERSE_OPTIONS = [10, 20, 50, 100, 200];
 const CONCURRENCY = 5;
 
 type Sort = 'score' | 'newest' | 'rank';
