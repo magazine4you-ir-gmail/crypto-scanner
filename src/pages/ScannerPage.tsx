@@ -15,7 +15,7 @@ import { Metric, TimeStamp, Chip } from '@/components/Responsive';
 import { TrackButton } from '@/components/TrackButton';
 import { PairLabel, ConfluenceBadge } from '@/components/Quote';
 import { formatPrice, formatNumber, formatDate } from '@/i18n/format';
-import { Radar, Filter, ChevronRight, History } from 'lucide-react';
+import { Radar, Filter, History } from 'lucide-react';
 import {
   createManualScanRun,
   finishManualScanRun,
@@ -129,7 +129,6 @@ export function ScannerPage() {
     }
   }, [user]);
 
-  // بازیابی آخرین اسکن از localStorage + تاریخچه ابری
   useEffect(() => {
     const local = loadLastScanLocal();
     if (local?.results?.length) {
@@ -178,7 +177,6 @@ export function ScannerPage() {
     const myRun = ++runId.current;
     setLoading(true);
     setError(null);
-    // نتایج قبلی را تا پایان اسکن جدید نگه می‌داریم (پاک نمی‌کنیم)
     setProgress(0);
     setSkipped(0);
 
@@ -296,7 +294,15 @@ export function ScannerPage() {
   }, [universe, timeframe, quoteMode, settings, t, user, sharePublic, reloadHistory]);
 
   const confluence = useMemo(
-    () => computeConfluence(results.map(({ result: r }) => ({ symbol: r.symbol, timeframe: r.timeframe, signalType: r.signalType, score: r.score }))),
+    () =>
+      computeConfluence(
+        results.map(({ result: r }) => ({
+          symbol: r.symbol,
+          timeframe: r.timeframe,
+          signalType: r.signalType,
+          score: r.score,
+        })),
+      ),
     [results],
   );
 
@@ -343,7 +349,11 @@ export function ScannerPage() {
               </option>
             ))}
           </select>
-          <select value={timeframe} onChange={(e) => setTimeframe(e.target.value as Timeframe)} className="input-field text-sm">
+          <select
+            value={timeframe}
+            onChange={(e) => setTimeframe(e.target.value as Timeframe)}
+            className="input-field text-sm"
+          >
             {TIMEFRAMES.map((tf) => (
               <option key={tf} value={tf}>
                 {tf.toUpperCase()}
@@ -392,12 +402,22 @@ export function ScannerPage() {
         </div>
 
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-7 gap-2 sm:gap-3 mt-2 sm:mt-3">
-          <select value={quoteMode} onChange={(e) => setQuoteMode(e.target.value as QuoteMode)} className="input-field text-sm" aria-label={t('quotePair')}>
+          <select
+            value={quoteMode}
+            onChange={(e) => setQuoteMode(e.target.value as QuoteMode)}
+            className="input-field text-sm"
+            aria-label={t('quotePair')}
+          >
             <option value="BOTH">{t('quotePair')}: USDT + BTC</option>
             <option value="USDT">{t('quotePair')}: USDT</option>
             <option value="BTC">{t('quotePair')}: BTC</option>
           </select>
-          <select value={pairFilter} onChange={(e) => setPairFilter(e.target.value as PairFilter)} className="input-field text-sm" aria-label={t('confluence')}>
+          <select
+            value={pairFilter}
+            onChange={(e) => setPairFilter(e.target.value as PairFilter)}
+            className="input-field text-sm"
+            aria-label={t('confluence')}
+          >
             <option value="ALL">{lang === 'fa' ? 'نمایش: همه جفت‌ها' : 'Show: all pairs'}</option>
             <option value="USDT">{lang === 'fa' ? 'نمایش: فقط USDT' : 'Show: USDT only'}</option>
             <option value="BTC">{lang === 'fa' ? 'نمایش: فقط BTC' : 'Show: BTC only'}</option>
@@ -409,6 +429,7 @@ export function ScannerPage() {
             {lang === 'fa'
               ? 'فهرست جفت‌های BTC دریافت نشد، پس فقط USDT اسکن شد. تابع market-data را دوباره deploy کنید.'
               : 'The BTC pair list was not available, so only USDT was scanned. Redeploy the market-data function.'}
+
           </p>
         )}
 
@@ -448,129 +469,62 @@ export function ScannerPage() {
       )}
 
       {!loading && !error && filtered.length > 0 && (
-        <>
-          {/* موبایل — همان UI خودت */}
-          <div className="md:hidden space-y-2.5">
-            {filtered.map(({ result: r, rank }) => (
-              <div
-                key={r.symbol}
-                role="button"
-                tabIndex={0}
-                onClick={() => navigate(`/asset/${r.symbol}?tf=${timeframe}`)}
-                onKeyDown={(e) => e.key === 'Enter' && navigate(`/asset/${r.symbol}?tf=${timeframe}`)}
-                className="card w-full text-start p-3 space-y-3 active:bg-surface-100 cursor-pointer"
-              >
-                <div className="flex items-start justify-between gap-2">
-                  <div className="min-w-0">
-                    <div className="flex items-center gap-2">
-                      <PairLabel symbol={r.symbol} className="text-base font-bold text-slate-100" />
-                      <Chip>{timeframe}</Chip>
-                      <span className="text-xs text-slate-500">#{rank}</span>
-                    </div>
-                    <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
-                      <SignalBadge type={r.signalType} quote={quoteOf(r.symbol)} />
-                      {(() => {
-                        const c = confluenceFor(confluence, r.symbol, r.timeframe);
-                        return isDualSignal(c) ? <ConfluenceBadge c={c} showLegs /> : null;
-                      })()}
-                    </div>
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-2.5">
+          {filtered.map(({ result: r, rank }) => (
+            <div
+              key={r.symbol}
+              role="button"
+              tabIndex={0}
+              onClick={() => navigate(`/asset/${r.symbol}?tf=${timeframe}`)}
+              onKeyDown={(e) => e.key === 'Enter' && navigate(`/asset/${r.symbol}?tf=${timeframe}`)}
+              className="card w-full text-start p-3 space-y-3 active:bg-surface-100 hover:bg-surface-100/80 cursor-pointer transition-colors"
+            >
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <PairLabel symbol={r.symbol} className="text-base font-bold text-slate-100" />
+                    <Chip>{timeframe}</Chip>
+                    <span className="text-xs text-slate-500">#{rank}</span>
                   </div>
-                  <div className="text-end shrink-0">
-                    <ScoreBar score={r.score} />
-                    <p className="text-sm font-semibold text-slate-100 tabular-nums mt-1">{formatPrice(r.priceAtSignal, lang)}</p>
+                  <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                    <SignalBadge type={r.signalType} quote={quoteOf(r.symbol)} />
+                    {(() => {
+                      const c = confluenceFor(confluence, r.symbol, r.timeframe);
+                      return isDualSignal(c) ? <ConfluenceBadge c={c} showLegs /> : null;
+                    })()}
                   </div>
                 </div>
-                {r.risk && r.signalType !== 'NO_TRADE' && (
-                  <div className="grid grid-cols-3 gap-x-3 gap-y-2 rounded-lg bg-surface-100/60 p-2.5">
-                    <Metric label={t('entry')} value={formatPrice(r.risk.entryLow, lang)} />
-                    <Metric label={t('stopLoss')} value={formatPrice(r.risk.stopLoss, lang)} tone="text-error-400" />
-                    <Metric label={t('asTarget')} value={formatPrice(r.risk.target1, lang)} tone="text-success-400" />
-                    <Metric label="R/R" value={formatNumber(r.risk.riskReward, lang, 1)} />
-                    <Metric label={t('trend')} value={<TrendBadge trend={r.trend} />} />
-                    <Metric label={t('risk')} value={<RiskBadge level={r.riskLevel} />} />
-                  </div>
-                )}
-                <div className="flex items-start justify-between gap-3 border-t border-surface-200 pt-2">
-                  <span className="text-xs text-slate-400">{r.structure}</span>
-                  <TimeStamp value={r.candleCloseTime} label={t('candleClosed')} />
-                </div>
-                <div onClick={(e) => e.stopPropagation()}>
-                  <TrackButton symbol={r.symbol} timeframe={timeframe} signalType={r.signalType} />
+                <div className="text-end shrink-0">
+                  <ScoreBar score={r.score} />
+                  <p className="text-sm font-semibold text-slate-100 tabular-nums mt-1">
+                    {formatPrice(r.priceAtSignal, lang)}
+                  </p>
                 </div>
               </div>
-            ))}
-          </div>
-
-          {/* دسکتاپ — همان UI خودت */}
-          <div className="hidden md:block card overflow-hidden">
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm min-w-[960px]">
-                <thead className="bg-surface-100 text-slate-400">
-                  <tr>
-                    {[t('asset'), t('signal'), t('score'), t('trend'), t('structure'), t('risk'), t('price'), t('stopLoss'), t('asTarget'), t('candleClosed'), '', ''].map(
-                      (h, i) => (
-                        <th key={i} className="px-3 py-3 text-start font-medium whitespace-nowrap">
-                          {h}
-                        </th>
-                      ),
-                    )}
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-surface-200">
-                  {filtered.map(({ result: r }) => (
-                    <tr
-                      key={r.symbol}
-                      onClick={() => navigate(`/asset/${r.symbol}?tf=${timeframe}`)}
-                      className="hover:bg-surface-100 transition-colors cursor-pointer"
-                    >
-                      <td className="px-3 py-3 font-semibold text-slate-100"><PairLabel symbol={r.symbol} /></td>
-                      <td className="px-3 py-3">
-                        <div className="flex flex-col items-start gap-1">
-                          <SignalBadge type={r.signalType} quote={quoteOf(r.symbol)} />
-                          {(() => {
-                            const c = confluenceFor(confluence, r.symbol, r.timeframe);
-                            return isDualSignal(c) ? <ConfluenceBadge c={c} showLegs /> : null;
-                          })()}
-                        </div>
-                      </td>
-                      <td className="px-3 py-3">
-                        <ScoreBar score={r.score} />
-                      </td>
-                      <td className="px-3 py-3">
-                        <TrendBadge trend={r.trend} />
-                      </td>
-                      <td className="px-3 py-3 text-slate-300 whitespace-nowrap">{r.structure}</td>
-                      <td className="px-3 py-3">
-                        <RiskBadge level={r.riskLevel} />
-                      </td>
-                      <td className="px-3 py-3 text-slate-300 tabular-nums whitespace-nowrap">{formatPrice(r.priceAtSignal, lang)}</td>
-                      <td className="px-3 py-3 text-slate-300 tabular-nums whitespace-nowrap">
-                        {r.risk && r.signalType !== 'NO_TRADE' ? formatPrice(r.risk.stopLoss, lang) : '—'}
-                      </td>
-                      <td className="px-3 py-3 text-slate-300 tabular-nums whitespace-nowrap">
-                        {r.risk && r.signalType !== 'NO_TRADE' ? formatPrice(r.risk.target1, lang) : '—'}
-                      </td>
-                      <td className="px-3 py-3 text-xs text-slate-400 whitespace-nowrap">
-                        {r.candleCloseTime ? formatDate(r.candleCloseTime, lang) : '—'}
-                      </td>
-                      <td className="px-3 py-3" onClick={(e) => e.stopPropagation()}>
-                        <TrackButton symbol={r.symbol} timeframe={timeframe} signalType={r.signalType} compact />
-                      </td>
-                      <td className="px-3 py-3">
-                        <ChevronRight className="w-4 h-4 text-slate-500 flip-x" />
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+              {r.risk && r.signalType !== 'NO_TRADE' && (
+                <div className="grid grid-cols-3 gap-x-3 gap-y-2 rounded-lg bg-surface-100/60 p-2.5">
+                  <Metric label={t('entry')} value={formatPrice(r.risk.entryLow, lang)} />
+                  <Metric label={t('stopLoss')} value={formatPrice(r.risk.stopLoss, lang)} tone="text-error-400" />
+                  <Metric label={t('asTarget')} value={formatPrice(r.risk.target1, lang)} tone="text-success-400" />
+                  <Metric label="R/R" value={formatNumber(r.risk.riskReward, lang, 1)} />
+                  <Metric label={t('trend')} value={<TrendBadge trend={r.trend} />} />
+                  <Metric label={t('risk')} value={<RiskBadge level={r.riskLevel} />} />
+                </div>
+              )}
+              <div className="flex items-start justify-between gap-3 border-t border-surface-200 pt-2">
+                <span className="text-xs text-slate-400">{r.structure}</span>
+                <TimeStamp value={r.candleCloseTime} label={t('candleClosed')} />
+              </div>
+              <div onClick={(e) => e.stopPropagation()}>
+                <TrackButton symbol={r.symbol} timeframe={timeframe} signalType={r.signalType} />
+              </div>
             </div>
-          </div>
-        </>
+          ))}
+        </div>
       )}
 
       {!loading && !error && scanned && filtered.length === 0 && <EmptyState message={t('noResults')} />}
 
-      {/* تاریخچه اسکن‌های دستی */}
       <Card className="!p-3 sm:!p-5">
         <div className="flex items-center gap-2 mb-3">
           <History className="w-4 h-4 text-slate-400" />
