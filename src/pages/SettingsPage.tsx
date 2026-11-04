@@ -127,6 +127,7 @@ export function SettingsPage() {
               <option value="top20">{t('top20')}</option>
               <option value="top50">{t('top50')}</option>
               <option value="top100">{t('top100')}</option>
+              <option value="top200">{t('top200')}</option>
             </select>
           </div>
           <div>
