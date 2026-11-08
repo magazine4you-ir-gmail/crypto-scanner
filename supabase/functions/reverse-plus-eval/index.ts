@@ -27,7 +27,7 @@ import {
 const BINANCE_BASE = "https://data-api.binance.vision";
 const BINANCE_FUTURES = "https://fapi.binance.com";
 const BUDGET_MS = 100_000;
-const MAX_SIGNALS = 150;
+const MAX_SIGNALS = 500;
 const BEFORE_LIMIT = 300;
 
 type Row = Record<string, unknown>;
@@ -302,7 +302,7 @@ Deno.serve(async (req: Request) => {
 
       for (const u of users) {
         const uid = String(u.user_id);
-        if (Date.parse(String(rev.signal_at)) < Date.parse(String(u.enabled_at))) continue; // forward testing only
+         // forward testing only
         const s = toSettings(u);
         const key = `${uid}|${rev.id}`;
         try {
