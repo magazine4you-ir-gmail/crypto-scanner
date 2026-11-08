@@ -18,7 +18,7 @@ import {
 } from '../../supabase/functions/_shared/reversePlus/index';
 import { isReversePlusEnabled } from '@/reversePlus/featureFlag';
 
-type Tab = 'signals' | 'trades' | 'performance' | 'settings';
+type Tab = 'signals' | 'history' | 'trades' | 'performance' | 'settings';
 const STATUS_TONE: Record<string, string> = {
   READY: 'bg-success-500/20 text-success-400',
   APPROACHING: 'bg-warning-500/20 text-warning-400',
@@ -34,6 +34,7 @@ export function ReversePlusPage() {
   const [tab, setTab] = useState<Tab>('signals');
   const [settings, setSettings] = useState<PlusSettingsRow | null>(null);
   const [evals, setEvals] = useState<PlusEvaluation[]>([]);
+  const [historyEvals, setHistoryEvals] = useState<PlusEvaluation[]>([]);
   const [trades, setTrades] = useState<PlusTrade[]>([]);
   const [reverse, setReverse] = useState<ReverseOutcome[]>([]);
   const [loading, setLoading] = useState(true);
@@ -43,10 +44,18 @@ export function ReversePlusPage() {
     setLoading(true);
     setError(null);
     try {
-      const [s, e, tr, rv] = await Promise.all([
-        fetchPlusSettings(), fetchEvaluations('LIVE'), fetchPlusTrades(), fetchReverseOutcomes(400).catch(() => []),
+      const [s, e, h, tr, rv] = await Promise.all([
+        fetchPlusSettings(),
+        fetchEvaluations('LIVE', 150),
+        fetchEvaluations('SIGNAL_TIME', 1000),
+        fetchPlusTrades(),
+        fetchReverseOutcomes(400).catch(() => []),
       ]);
-      setSettings(s); setEvals(e); setTrades(tr); setReverse(rv);
+      setSettings(s);
+      setEvals(e);
+      setHistoryEvals(h);
+      setTrades(tr);
+      setReverse(rv);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -76,9 +85,20 @@ export function ReversePlusPage() {
     return <div className="space-y-6">{header}<Card><button className="btn-primary text-sm" onClick={() => navigate('/login')}>{t('signIn')}</button></Card></div>;
   }
 
+  // SIGNAL_TIME includes both historical and post-activation snapshots.
+  // Only rows strictly before enabled_at belong in the historical backtest.
+  const historicalEvals = settings?.enabled_at
+    ? historyEvals.filter((e) =>
+        !!e.signal_at && new Date(e.signal_at).getTime() < new Date(settings.enabled_at!).getTime()
+      )
+    : [];
+
   const tabs: { key: Tab; label: string }[] = [
-    { key: 'signals', label: t('rpSignals') }, { key: 'trades', label: t('rpTrades') },
-    { key: 'performance', label: t('rpPerformance') }, { key: 'settings', label: t('rpSettings') },
+    { key: 'signals', label: t('rpSignals') },
+    { key: 'history', label: `بک‌تست تاریخی (${historicalEvals.length})` },
+    { key: 'trades', label: t('rpTrades') },
+    { key: 'performance', label: t('rpPerformance') },
+    { key: 'settings', label: t('rpSettings') },
   ];
 
   return (
@@ -89,12 +109,151 @@ export function ReversePlusPage() {
       {loading ? <LoadingSpinner /> : error ? <ErrorState message={error} onRetry={() => void load()} /> : (
         <>
           {tab === 'signals' && <SignalsTab evals={evals} enabled={!!settings?.enabled} />}
+          {tab === 'history' && <HistoryTab evals={historicalEvals} enabledAt={settings?.enabled_at ?? null} />}
           {tab === 'trades' && <TradesTab trades={trades} evals={evals} settings={settings} userId={user!.id} onChanged={load} />}
           {tab === 'performance' && <PerformanceTab trades={trades} reverse={reverse} />}
           {tab === 'settings' && <SettingsTab settings={settings} userId={user!.id} onSaved={setSettings} />}
         </>
       )}
       <p className="text-[11px] text-slate-500 leading-relaxed">{t('disclaimer')}</p>
+    </div>
+  );
+}
+
+
+// ------------------------------------------------------------------------------------------------
+// Historical backtest: read-only SIGNAL_TIME evaluations created before Reverse Plus activation.
+// These rows are deliberately kept separate from LIVE signals and actual-trade entry selection.
+function HistoryTab({ evals, enabledAt }: { evals: PlusEvaluation[]; enabledAt: string | null }) {
+  const { lang } = useSettings();
+  const [query, setQuery] = useState('');
+  const [timeframe, setTimeframe] = useState('ALL');
+  const [status, setStatus] = useState('ALL');
+  const [page, setPage] = useState(0);
+  const pageSize = 30;
+
+  const timeframes = useMemo(
+    () => Array.from(new Set(evals.map((e) => e.timeframe).filter(Boolean))).sort(),
+    [evals]
+  );
+
+  const filtered = useMemo(() => {
+    const q = query.trim().toUpperCase();
+    return evals.filter((e) => {
+      const matchesQuery = !q || e.symbol.toUpperCase().includes(q);
+      const matchesTimeframe = timeframe === 'ALL' || e.timeframe === timeframe;
+      const matchesStatus = status === 'ALL' || e.entry_status === status;
+      return matchesQuery && matchesTimeframe && matchesStatus;
+    });
+  }, [evals, query, timeframe, status]);
+
+  const pageCount = Math.max(1, Math.ceil(filtered.length / pageSize));
+  const safePage = Math.min(page, pageCount - 1);
+  const visible = filtered.slice(safePage * pageSize, (safePage + 1) * pageSize);
+
+  const statusCounts = useMemo(() => ({
+    READY: evals.filter((e) => e.entry_status === 'READY').length,
+    APPROACHING: evals.filter((e) => e.entry_status === 'APPROACHING').length,
+    WAITING: evals.filter((e) => e.entry_status === 'WAITING').length,
+    INVALID: evals.filter((e) => e.entry_status === 'INVALID').length,
+    EXPIRED: evals.filter((e) => e.entry_status === 'EXPIRED').length,
+  }), [evals]);
+
+  const resetPage = () => setPage(0);
+
+  return (
+    <div className="space-y-4">
+      <Card className="!p-4 space-y-3">
+        <div className="flex items-start justify-between gap-3 flex-wrap">
+          <div>
+            <h2 className="font-semibold text-slate-100">بک‌تست تاریخی سیگنال‌های معکوس</h2>
+            <p className="text-xs text-slate-400 mt-1 leading-relaxed">
+              این سوابق فقط برای ارزیابی گذشته هستند؛ معامله PAPER یا LIVE از آن‌ها ساخته نمی‌شود.
+            </p>
+          </div>
+          <Chip>{evals.length.toLocaleString(lang === 'fa' ? 'fa-IR' : 'en-US')} رکورد تاریخی</Chip>
+        </div>
+
+        <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
+          <div className="rounded-lg bg-surface-100 p-2"><p className="text-[10px] text-slate-500">مجموع</p><p className="text-sm font-semibold text-slate-100">{evals.length}</p></div>
+          <div className="rounded-lg bg-surface-100 p-2"><p className="text-[10px] text-slate-500">آماده</p><p className="text-sm font-semibold text-success-400">{statusCounts.READY}</p></div>
+          <div className="rounded-lg bg-surface-100 p-2"><p className="text-[10px] text-slate-500">نزدیک ورود</p><p className="text-sm font-semibold text-warning-400">{statusCounts.APPROACHING}</p></div>
+          <div className="rounded-lg bg-surface-100 p-2"><p className="text-[10px] text-slate-500">نامعتبر</p><p className="text-sm font-semibold text-error-400">{statusCounts.INVALID}</p></div>
+          <div className="rounded-lg bg-surface-100 p-2"><p className="text-[10px] text-slate-500">منقضی / منتظر</p><p className="text-sm font-semibold text-slate-300">{statusCounts.EXPIRED + statusCounts.WAITING}</p></div>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+          <input
+            className="input-field w-full text-sm"
+            value={query}
+            onChange={(e) => { setQuery(e.target.value); resetPage(); }}
+            placeholder="جست‌وجوی نماد، مثل BTCUSDT"
+            aria-label="جست‌وجوی نماد در بک‌تست تاریخی"
+          />
+          <select
+            className="input-field w-full text-sm"
+            value={timeframe}
+            onChange={(e) => { setTimeframe(e.target.value); resetPage(); }}
+            aria-label="فیلتر تایم‌فریم"
+          >
+            <option value="ALL">همه تایم‌فریم‌ها</option>
+            {timeframes.map((tf) => <option key={tf} value={tf}>{tf}</option>)}
+          </select>
+          <select
+            className="input-field w-full text-sm"
+            value={status}
+            onChange={(e) => { setStatus(e.target.value); resetPage(); }}
+            aria-label="فیلتر وضعیت"
+          >
+            <option value="ALL">همه وضعیت‌ها</option>
+            <option value="READY">آماده ورود</option>
+            <option value="APPROACHING">نزدیک ورود</option>
+            <option value="WAITING">در انتظار</option>
+            <option value="INVALID">نامعتبر</option>
+            <option value="EXPIRED">منقضی</option>
+          </select>
+        </div>
+
+        <div className="flex items-center justify-between gap-2 text-xs text-slate-400">
+          <span>{filtered.length.toLocaleString(lang === 'fa' ? 'fa-IR' : 'en-US')} نتیجه از {evals.length.toLocaleString(lang === 'fa' ? 'fa-IR' : 'en-US')}</span>
+          <button
+            className="text-primary-400 disabled:text-slate-600"
+            onClick={() => { setQuery(''); setTimeframe('ALL'); setStatus('ALL'); setPage(0); }}
+            disabled={!query && timeframe === 'ALL' && status === 'ALL'}
+          >
+            پاک‌کردن فیلترها
+          </button>
+        </div>
+        {enabledAt && (
+          <p className="text-[10px] text-slate-500">
+            مرز تفکیک سوابق تاریخی: پیش از زمان فعال‌سازی Reverse Plus
+          </p>
+        )}
+      </Card>
+
+      {visible.length === 0 ? (
+        <EmptyState message="با فیلترهای انتخاب‌شده رکوردی پیدا نشد." />
+      ) : (
+        <div className="space-y-3">
+          {visible.map((e) => (
+            <div key={e.id} className="space-y-1">
+              <EvalCard e={e} />
+              <div className="px-1 flex justify-between gap-2 text-[10px] text-slate-500">
+                <span>زمان سیگنال: <TimeStamp value={e.signal_at} compact /></span>
+                <span>تاریخی · فقط جهت بک‌تست</span>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {filtered.length > pageSize && (
+        <div className="flex items-center justify-between gap-3">
+          <button className="btn-secondary text-xs" disabled={safePage === 0} onClick={() => setPage((p) => Math.max(0, p - 1))}>صفحه قبل</button>
+          <span className="text-xs text-slate-400 tabular-nums">صفحه {safePage + 1} از {pageCount}</span>
+          <button className="btn-secondary text-xs" disabled={safePage >= pageCount - 1} onClick={() => setPage((p) => Math.min(pageCount - 1, p + 1))}>صفحه بعد</button>
+        </div>
+      )}
     </div>
   );
 }
