@@ -1,3 +1,5 @@
+import { reversePlusTranslations } from './reversePlusTranslations';
+
 export type Lang = 'fa' | 'en';
 
 export interface Translations {
@@ -399,6 +401,11 @@ export const translations: Translations = {
   labResult: { fa: 'نتیجه آزمایش', en: 'Lab result' },
   source: { fa: 'منبع', en: 'Source' },
 };
+
+// Reverse Signal Plus (additive keys, prefix "rp"; no existing key is overwritten)
+for (const [k, v] of Object.entries(reversePlusTranslations)) {
+  if (!(k in translations)) translations[k] = v;
+}
 
 export function t(key: string, lang: Lang): string {
   const entry = translations[key];
