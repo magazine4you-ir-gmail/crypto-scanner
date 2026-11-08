@@ -206,7 +206,7 @@ Deno.serve(async (req: Request) => {
     const REV_COLS = "id, origin_outcome_id, symbol, timeframe, signal_type, price_at_signal, entry_low, entry_high, stop_loss, target1, signal_at, candle_close_time, status";
     const { data: revRows, error: revErr } = await supabase
       .from("reverse_signal_outcomes").select(REV_COLS)
-      .gte("signal_at", minEnabledAt).neq("status", "CANCELLED").not("candle_close_time", "is", null)
+      .neq("status", "CANCELLED").not("candle_close_time", "is", null)
       .order("signal_at", { ascending: false }).limit(MAX_SIGNALS);
     if (revErr) throw new Error(`reverse signals: ${revErr.message}`);
     const revById = new Map<string, Row>((revRows ?? []).map((r: Row) => [String(r.id), r]));
