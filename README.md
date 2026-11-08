@@ -95,3 +95,8 @@ Implementation: pure geometry in `engine.ts` (`reversePlan`, `buildReverseOutcom
 3. Read `audit-report.md` (and `audit-report.csv` for per-signal rows):
    - **A)** re-runs the server logic on real candles: is every stored result correct?
    - **B)** what-if stops/targets, mirror test and a time-matched random baseline: stop too small, or no edge?
+
+
+## Reverse Signal Plus (independent module)
+
+Standalone entry-timing / position-sizing / risk-control analysis for the existing reverse signal (analysis + paper trading only, no orders). It does not change any existing signal logic or statistic. See [docs/REVERSE_PLUS.md](docs/REVERSE_PLUS.md). Disable with `VITE_REVERSE_PLUS_ENABLED=false`.
