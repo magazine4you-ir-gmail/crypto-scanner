@@ -23,8 +23,9 @@ import {
 } from 'lucide-react';
 import { useState } from 'react';
 import { FuturesCalculatorButton } from '@/components/FuturesCalculator';
+import { isReversePlusEnabled, withReversePlusNav } from '@/reversePlus/featureFlag';
 
-const navItems = [
+const baseNavItems = [
   { key: 'dashboard', path: '/', icon: LayoutDashboard },
   { key: 'scanner', path: '/scanner', icon: Radar },
   { key: 'autoScan', path: '/auto-scan', icon: Timer },
@@ -39,6 +40,9 @@ const navItems = [
   { key: 'settings', path: '/settings', icon: SettingsIcon },
   { key: 'profile', path: '/profile', icon: UserIcon },
 ];
+
+// Reverse Signal Plus adds ONE menu entry (only when its feature flag is on); the list is otherwise unchanged
+const navItems = withReversePlusNav(baseNavItems, isReversePlusEnabled(), { key: 'reversePlus', path: '/reverse-plus', icon: ArrowLeftRight });
 
 const bottomItems = [navItems[0], navItems[2], navItems[1], navItems[3]];
 
