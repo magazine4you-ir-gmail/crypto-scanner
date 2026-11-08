@@ -1,0 +1,223 @@
+{
+ "core": {
+  "signalType": "NO_TRADE",
+  "bias": "SHORT",
+  "score": 54,
+  "bullScore": 47,
+  "bearScore": 54,
+  "regime": "LOW_VOLATILITY",
+  "trend": "BEARISH",
+  "structure": "LH_LL",
+  "riskLevel": "LOW",
+  "price": 107.56082195183586,
+  "candleCloseTime": 1701079999999,
+  "rsi": 55.16023112740592,
+  "atrPct": 0.6603205897401108,
+  "relVolume": 1.0696097526802613,
+  "adx": 23.26912975837369,
+  "risk": {
+   "entryLow": 107.34774807568336,
+   "entryHigh": 107.56082195183586,
+   "invalidation": 108.62619133259837,
+   "stopLoss": 108.62619133259837,
+   "target1": 105.43008319031084,
+   "target2": 104.36471380954833,
+   "target3": 102.23397504802331,
+   "riskReward": 0.3196514565752934,
+   "riskLevel": "LOW",
+   "positionSize": 92.97065435663788,
+   "riskPct": 0.990480884610166,
+   "obstacle": 107.21856378665852
+  },
+  "longPlan": {
+   "entryLow": 107.56082195183586,
+   "entryHigh": 107.77389582798837,
+   "invalidation": 106.99262494876253,
+   "stopLoss": 106.99262494876253,
+   "target1": 108.69721595798254,
+   "target2": 109.26541296105587,
+   "target3": 110.40180696720256,
+   "riskReward": 2,
+   "riskLevel": "LOW",
+   "positionSize": 92.97065435663788,
+   "riskPct": 0.5282564717920886,
+   "obstacle": 109.56870958787825
+  },
+  "shortPlan": {
+   "entryLow": 107.34774807568336,
+   "entryHigh": 107.56082195183586,
+   "invalidation": 108.62619133259837,
+   "stopLoss": 108.62619133259837,
+   "target1": 105.43008319031084,
+   "target2": 104.36471380954833,
+   "target3": 102.23397504802331,
+   "riskReward": 0.3196514565752934,
+   "riskLevel": "LOW",
+   "positionSize": 92.97065435663788,
+   "riskPct": 0.990480884610166,
+   "obstacle": 107.21856378665852
+  },
+  "levels": [
+   {
+    "price": 107.21856378665852,
+    "type": "SUPPORT",
+    "strength": 9.7,
+    "touches": 11
+   },
+   {
+    "price": 113.11143780419674,
+    "type": "RESISTANCE",
+    "strength": 9.7,
+    "touches": 12
+   },
+   {
+    "price": 109.56870958787825,
+    "type": "RESISTANCE",
+    "strength": 7.9,
+    "touches": 9
+   },
+   {
+    "price": 103.51731310752477,
+    "type": "SUPPORT",
+    "strength": 5.3,
+    "touches": 9
+   },
+   {
+    "price": 101.10924321806209,
+    "type": "SUPPORT",
+    "strength": 5.1,
+    "touches": 9
+   },
+   {
+    "price": 115.15995131281896,
+    "type": "RESISTANCE",
+    "strength": 2.4,
+    "touches": 3
+   }
+  ],
+  "bullFactors": [
+   {
+    "key": "trend",
+    "positive": false,
+    "weight": 20
+   },
+   {
+    "key": "structure",
+    "positive": false,
+    "weight": 20
+   },
+   {
+    "key": "momentum",
+    "positive": true,
+    "weight": 15
+   },
+   {
+    "key": "volume",
+    "positive": true,
+    "weight": 15
+   },
+   {
+    "key": "volatility",
+    "positive": true,
+    "weight": 10
+   },
+   {
+    "key": "support_resistance",
+    "positive": false,
+    "weight": 10
+   },
+   {
+    "key": "risk_reward",
+    "positive": true,
+    "weight": 10
+   }
+  ],
+  "bearFactors": [
+   {
+    "key": "trend",
+    "positive": true,
+    "weight": 20
+   },
+   {
+    "key": "structure",
+    "positive": true,
+    "weight": 20
+   },
+   {
+    "key": "momentum",
+    "positive": false,
+    "weight": 15
+   },
+   {
+    "key": "volume",
+    "positive": true,
+    "weight": 15
+   },
+   {
+    "key": "volatility",
+    "positive": true,
+    "weight": 10
+   },
+   {
+    "key": "support_resistance",
+    "positive": false,
+    "weight": 10
+   },
+   {
+    "key": "risk_reward",
+    "positive": false,
+    "weight": 10
+   }
+  ],
+  "reasons": [
+   "ریسک/بازده نامناسب",
+   "Bad risk/reward"
+  ]
+ },
+ "reverseBuy": {
+  "signalType": "SELL",
+  "direction": "SHORT",
+  "entry": 100,
+  "stop": 103,
+  "target": 98.5,
+  "riskReward": 0.5
+ },
+ "reverseSell": {
+  "signalType": "BUY",
+  "direction": "LONG",
+  "entry": 100,
+  "stop": 97,
+  "target": 101.5,
+  "riskReward": 0.5
+ },
+ "row": {
+  "origin_outcome_id": "o1",
+  "symbol": "ABCUSDT",
+  "base_asset": "ABC",
+  "timeframe": "1h",
+  "signal_type": "SELL",
+  "origin_signal_type": "BUY",
+  "score": 77,
+  "price_at_signal": 100,
+  "entry_low": 100,
+  "entry_high": 100.3,
+  "stop_loss": 103,
+  "target1": 98.5,
+  "risk_reward": 0.5,
+  "signal_at": "2026-01-01T00:00:00.000Z",
+  "candle_close_time": "2026-01-01T00:59:59.999Z",
+  "status": "OPEN",
+  "source": "auto_scan",
+  "tracked_by": null
+ },
+ "resolve": {
+  "status": "LOSS",
+  "exitPrice": 104.95118121549069,
+  "exitTime": 1700363599999,
+  "barsHeld": 1,
+  "pnlPct": -5.201181215490692,
+  "grossPnlPct": -4.951181215490692,
+  "rMultiple": -1.7337270718302307
+ },
+ "risk": 6
+}
