@@ -21,6 +21,8 @@ import type { ReactNode } from 'react';
 import { SignalLabPage } from '@/pages/SignalLabPage';
 import { ScalpPage } from '@/pages/ScalpPage';
 import { ReverseLabPage } from '@/pages/ReverseLabPage';
+import { ReversePlusPage } from '@/pages/ReversePlusPage';
+import { isReversePlusEnabled } from '@/reversePlus/featureFlag';
 
 function AppRoute({ children }: { children: ReactNode }) {
   const { loading } = useAuth();
@@ -71,6 +73,7 @@ function AppRoutes() {
       <Route path="/profile" element={<AppRoute><ProfilePage /></AppRoute>} />
       <Route path="/signal-lab" element={<AppRoute><SignalLabPage /></AppRoute>} />
       <Route path="/reverse-lab" element={<AppRoute><ReverseLabPage /></AppRoute>} />
+      {isReversePlusEnabled() && <Route path="/reverse-plus" element={<AppRoute><ReversePlusPage /></AppRoute>} />}
       <Route path="/scalp" element={<AppRoute><ScalpPage /></AppRoute>} />
 
       <Route path="*" element={<Navigate to="/" replace />} />
