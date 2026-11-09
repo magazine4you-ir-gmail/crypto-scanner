@@ -1,7 +1,5 @@
 import { supabase } from './supabaseClient';
 
-export const REVERSE_PLUS_CENTRAL_OWNER = '8f7a2b6e-4c91-4d35-a8e2-6b1f9c3d7e50';
-
 /**
  * Reverse Signal Plus client service. Reads its OWN tables only (reverse_plus_*); the only rows the browser can
  * write are the user's settings and their own ACTUAL trade records (RLS). Evaluations and PAPER trades are written
@@ -65,12 +63,12 @@ export interface PlanStepRow {
   netRisk: string;
 }
 
+export const REVERSE_PLUS_CENTRAL_OWNER = '8f7a2b6e-4c91-4d35-a8e2-6b1f9c3d7e50';
+
 export interface PlusEvaluation {
-  user_id: string | null;
-  owner_key: string | null;
-  source: string;
   id: string;
   user_id?: string | null;
+  owner_key?: string | null;
   reverse_outcome_id: string;
   origin_outcome_id: string | null;
   symbol: string;
@@ -117,11 +115,10 @@ export interface PlusEvaluation {
 export type PlusOutcome = 'PENDING' | 'OPEN' | 'WIN' | 'LOSS' | 'EXPIRED' | 'BREAKEVEN' | 'NO_FILL' | 'CANCELLED';
 
 export interface PlusTrade {
-  user_id: string | null;
-  owner_key: string | null;
   id: string;
   /** null = central (public) PAPER trade; set = the owner's own ACTUAL (or legacy) row */
   user_id: string | null;
+  owner_key?: string | null;
   mode: 'PAPER' | 'ACTUAL';
   reverse_outcome_id: string;
   origin_outcome_id: string | null;
@@ -155,7 +152,6 @@ export async function fetchPlusSettings(): Promise<PlusSettingsRow | null> {
   return (data as PlusSettingsRow | null) ?? null;
 }
 
-<<<<<<< HEAD
 /** Public reference configuration used by the central evaluator (read-only for users). */
 export interface PlusPublicConfig {
   public_since: string;
@@ -179,19 +175,6 @@ export async function fetchPublicConfig(): Promise<PlusPublicConfig | null> {
 
 export async function savePlusSettings(userId: string, patch: Partial<PlusPersonalSettings>): Promise<PlusSettingsRow> {
   // `enabled` / `enabled_at` are deliberately never written from the browser any more.
-=======
-export async function fetchPlusPublicSince(): Promise<string | null> {
-  const { data, error } = await supabase
-    .from('reverse_plus_public_config')
-    .select('public_since')
-    .eq('id', true)
-    .maybeSingle();
-  if (error) throw new Error(error.message);
-  return data?.public_since ?? null;
-}
-
-export async function savePlusSettings(userId: string, patch: Partial<PlusSettingsRow>): Promise<PlusSettingsRow> {
->>>>>>> c3df976 (Centralize Reverse Plus evaluations and paper trades)
   const { data, error } = await supabase
     .from('reverse_plus_settings')
     .upsert({ ...DEFAULT_PLUS_SETTINGS, ...patch, user_id: userId }, { onConflict: 'user_id' })
@@ -206,10 +189,9 @@ export async function fetchEvaluations(kind: 'LIVE' | 'SIGNAL_TIME' = 'LIVE', li
     .from('reverse_plus_evaluations')
     .select('*')
     .is('user_id', null) // central (public) rows: identical for every user
-    .eq('eval_kind', kind)
-    .is('user_id', null)
     .eq('owner_key', REVERSE_PLUS_CENTRAL_OWNER)
     .eq('source', 'CENTRAL')
+    .eq('eval_kind', kind)
     .order('signal_at', { ascending: false })
     .limit(limit);
   if (error) throw new Error(error.message);
@@ -259,7 +241,7 @@ export async function fetchBacktestFor(reverseOutcomeId: string): Promise<PlusBa
 
 /** Central SIGNAL_TIME + LIVE evaluations of one signal. */
 export async function fetchEvaluationsFor(reverseOutcomeId: string): Promise<{ signalTime: PlusEvaluation | null; live: PlusEvaluation | null }> {
-  const { data, error } = await supabase.from('reverse_plus_evaluations').select('*').is('user_id', null).eq('reverse_outcome_id', reverseOutcomeId);
+  const { data, error } = await supabase.from('reverse_plus_evaluations').select('*').is('user_id', null).eq('owner_key', REVERSE_PLUS_CENTRAL_OWNER).eq('source', 'CENTRAL').eq('reverse_outcome_id', reverseOutcomeId);
   if (error) throw new Error(error.message);
   const rows = (data ?? []) as PlusEvaluation[];
   return { signalTime: rows.find((r) => r.eval_kind === 'SIGNAL_TIME') ?? null, live: rows.find((r) => r.eval_kind === 'LIVE') ?? null };
@@ -269,12 +251,8 @@ export async function fetchPlusTrades(limit = 500): Promise<PlusTrade[]> {
   const { data, error } = await supabase
     .from('reverse_plus_trades')
     .select('*')
-<<<<<<< HEAD
     // central PAPER rows (user_id null) + the signed-in user's own ACTUAL rows (RLS already hides other users' rows)
-    .or('and(user_id.is.null,mode.eq.PAPER),mode.eq.ACTUAL')
-=======
-    .or(`and(mode.eq.PAPER,user_id.is.null,owner_key.eq.${REVERSE_PLUS_CENTRAL_OWNER}),mode.eq.ACTUAL`)
->>>>>>> c3df976 (Centralize Reverse Plus evaluations and paper trades)
+    .or(`and(user_id.is.null,mode.eq.PAPER,owner_key.eq.${REVERSE_PLUS_CENTRAL_OWNER}),mode.eq.ACTUAL`)
     .order('signal_at', { ascending: false })
     .limit(limit);
   if (error) throw new Error(error.message);

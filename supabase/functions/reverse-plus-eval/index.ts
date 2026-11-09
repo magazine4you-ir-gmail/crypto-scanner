@@ -23,7 +23,7 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "npm:@supabase/supabase-js@2.57.4";
 import { closedCandles, EXPIRY_BARS, quoteOf, timeframeMs, type Candle } from "../_shared/engine.ts";
 import {
-  BACKTEST_ENGINE_VERSION, D, PUBLIC_OWNER, UNKNOWN_CONTRACT, backtestSignal, buildPlusAnalysis, isHistoricalSignal, jsonSafe, mayCreatePaperTrade, simulatePaper, toString,
+  BACKTEST_ENGINE_VERSION, D, UNKNOWN_CONTRACT, backtestSignal, buildPlusAnalysis, isHistoricalSignal, jsonSafe, mayCreatePaperTrade, simulatePaper, toString,
   type BtCandle,
   type ContractSpec, type Dec, type PlusAnalysis, type PlusSettings, type Side,
 } from "../_shared/reversePlus/index.ts";
@@ -31,12 +31,8 @@ import {
 const BINANCE_BASE = "https://data-api.binance.vision";
 const BINANCE_FUTURES = "https://fapi.binance.com";
 const BUDGET_MS = 100_000;
-<<<<<<< HEAD
-const MAX_SIGNALS = 3000; // newest first, read in pages of 1000 (backlog of historical signals is processed over several runs)
-=======
-const MAX_SIGNALS = 500;
 const CENTRAL_OWNER_KEY = "8f7a2b6e-4c91-4d35-a8e2-6b1f9c3d7e50";
->>>>>>> c3df976 (Centralize Reverse Plus evaluations and paper trades)
+const MAX_SIGNALS = 3000; // newest first, read in pages of 1000 (backlog of historical signals is processed over several runs)
 const BEFORE_LIMIT = 300;
 
 type Row = Record<string, unknown>;
@@ -191,26 +187,20 @@ Deno.serve(async (req: Request) => {
   if (!expected || !safeEqual(provided, expected)) return json({ error: "unauthorized" }, 401);
   if (req.method !== "POST" && req.method !== "GET") return json({ error: "method not allowed" }, 405);
 
-  // Global kill switch
+  // global kill switch: no database access, no network, nothing
   if ((Deno.env.get("REVERSE_PLUS_ENABLED") ?? "true").trim().toLowerCase() === "false") {
     return json({ ok: true, skipped: "REVERSE_PLUS_ENABLED=false" });
   }
 
-  // Trigger requests target one signal; cron requests without an ID reconcile the queue.
   let requestedId: string | null = null;
   if (req.method === "POST") {
     try {
-      const body = await req.json();
-      if (body && typeof body.reverse_outcome_id === "string" && body.reverse_outcome_id.trim()) {
-        requestedId = body.reverse_outcome_id.trim();
-      }
-    } catch {
-      // Empty body is valid for the scheduled reconciliation run.
-    }
+      const body = await req.clone().json() as { reverse_outcome_id?: unknown };
+      if (typeof body?.reverse_outcome_id === "string" && body.reverse_outcome_id.trim()) requestedId = body.reverse_outcome_id.trim();
+    } catch { /* an empty POST is the scheduled reconciliation request */ }
   }
 
   const t0 = Date.now();
-<<<<<<< HEAD
   const supabase = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
   const stats = { users: 0, signals: 0, evalCreated: 0, liveUpserted: 0, tradesCreated: 0, tradesUpdated: 0, backtests: 0, btRetry: 0, skippedBudget: 0, errors: [] as string[] };
   const err = (m: string) => { if (stats.errors.length < 10) stats.errors.push(m); };
@@ -227,157 +217,51 @@ Deno.serve(async (req: Request) => {
     // ---- existing reverse signals (READ ONLY) ----------------------------------------------
     const REV_COLS = "id, origin_outcome_id, symbol, timeframe, signal_type, price_at_signal, entry_low, entry_high, stop_loss, target1, signal_at, candle_close_time, status";
     const revRows: Row[] = [];
-    for (let from = 0; from < MAX_SIGNALS; from += 1000) {
-      const { data, error: revErr } = await supabase
-        .from("reverse_signal_outcomes").select(REV_COLS)
-        .neq("status", "CANCELLED").not("candle_close_time", "is", null)
-        .order("signal_at", { ascending: false }).range(from, from + 999);
-      if (revErr) throw new Error(`reverse signals: ${revErr.message}`);
-      revRows.push(...((data ?? []) as Row[]));
-      if (!data || data.length < 1000) break;
+    if (requestedId) {
+      const { data, error: revErr } = await supabase.from("reverse_signal_outcomes").select(REV_COLS)
+        .eq("id", requestedId).neq("status", "CANCELLED").not("candle_close_time", "is", null).maybeSingle();
+      if (revErr) throw new Error(`reverse signal ${requestedId}: ${revErr.message}`);
+      if (data) revRows.push(data as Row);
+    } else {
+      for (let from = 0; from < MAX_SIGNALS; from += 1000) {
+        const { data, error: revErr } = await supabase
+          .from("reverse_signal_outcomes").select(REV_COLS)
+          .neq("status", "CANCELLED").not("candle_close_time", "is", null)
+          .order("signal_at", { ascending: false }).range(from, from + 999);
+        if (revErr) throw new Error(`reverse signals: ${revErr.message}`);
+        revRows.push(...((data ?? []) as Row[]));
+        if (!data || data.length < 1000) break;
+      }
     }
-    const revById = new Map<string, Row>((revRows ?? []).map((r: Row) => [String(r.id), r]));
+    const revById = new Map<string, Row>(revRows.map((r) => [String(r.id), r]));
 
     // open central paper trades may belong to older signals than the window above
-    const { data: openTrades } = await supabase
-      .from("reverse_plus_trades").select("*").eq("mode", "PAPER").in("outcome", ["PENDING", "OPEN"]).is("user_id", null);
+    const { data: openTrades } = requestedId ? { data: [] as Row[] } : await supabase
+      .from("reverse_plus_trades").select("*").eq("mode", "PAPER").eq("owner_key", CENTRAL_OWNER_KEY)
+      .in("outcome", ["PENDING", "OPEN"]).is("user_id", null);
     const missingIds = (openTrades ?? []).map((t: Row) => String(t.reverse_outcome_id)).filter((id: string) => !revById.has(id));
     for (let i = 0; i < missingIds.length; i += 100) {
       const { data } = await supabase.from("reverse_signal_outcomes").select(REV_COLS).in("id", missingIds.slice(i, i + 100));
       for (const r of data ?? []) revById.set(String(r.id), r as Row);
-=======
-  const supabase = createClient(
-    Deno.env.get("SUPABASE_URL")!,
-    Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
-  );
-  const stats = {
-    users: 1, signals: 0, evalCreated: 0, liveUpserted: 0,
-    tradesCreated: 0, tradesUpdated: 0, skippedBudget: 0, errors: [] as string[],
-  };
-  const err = (m: string) => {
-    if (stats.errors.length < 10) stats.errors.push(m);
-  };
-
-  try {
-    // Shared public configuration; personal settings do not gate central evaluation.
-    const { data: publicConfig, error: configErr } = await supabase
-      .from("reverse_plus_public_config")
-      .select("*")
-      .eq("id", true)
-      .single();
-
-    if (configErr || !publicConfig) {
-      throw new Error(`public config: ${configErr?.message ?? "configuration row not found"}`);
     }
 
-    const settings = toSettings(publicConfig);
-    const REV_COLS =
-      "id, origin_outcome_id, symbol, timeframe, signal_type, price_at_signal, entry_low, entry_high, stop_loss, target1, signal_at, candle_close_time, status";
-
-    const revById = new Map<string, Row>();
-
-    if (requestedId) {
-      const { data: target, error: targetErr } = await supabase
-        .from("reverse_signal_outcomes")
-        .select(REV_COLS)
-        .eq("id", requestedId)
-        .neq("status", "CANCELLED")
-        .not("candle_close_time", "is", null)
-        .maybeSingle();
-
-      if (targetErr) throw new Error(`target signal: ${targetErr.message}`);
-      if (!target) {
-        return json({
-          ok: true,
-          skipped: "signal not found or not eligible",
-          reverse_outcome_id: requestedId,
-          ...stats,
-        });
-      }
-      revById.set(String(target.id), target as Row);
-    } else {
-      // Backup/reconciliation run: retain older signals that still have open central PAPER trades.
-      const { data: openTrades, error: openErr } = await supabase
-        .from("reverse_plus_trades")
-        .select("reverse_outcome_id")
-        .is("user_id", null)
-        .eq("owner_key", CENTRAL_OWNER_KEY)
-        .eq("mode", "PAPER")
-        .in("outcome", ["PENDING", "OPEN"]);
-
-      if (openErr) throw new Error(`open paper trades: ${openErr.message}`);
-
-      const { data: revRows, error: revErr } = await supabase
-        .from("reverse_signal_outcomes")
-        .select(REV_COLS)
-        .neq("status", "CANCELLED")
-        .not("candle_close_time", "is", null)
-        .order("signal_at", { ascending: false })
-        .limit(MAX_SIGNALS);
-
-      if (revErr) throw new Error(`reverse signals: ${revErr.message}`);
-      for (const r of revRows ?? []) revById.set(String(r.id), r as Row);
-
-      const missingIds = [...new Set((openTrades ?? [])
-        .map((t: Row) => String(t.reverse_outcome_id))
-        .filter((id: string) => !revById.has(id)))];
-
-      for (let i = 0; i < missingIds.length; i += 100) {
-        const { data, error } = await supabase
-          .from("reverse_signal_outcomes")
-          .select(REV_COLS)
-          .in("id", missingIds.slice(i, i + 100));
-
-        if (error) throw new Error(`older open signals: ${error.message}`);
-        for (const r of data ?? []) revById.set(String(r.id), r as Row);
-      }
->>>>>>> c3df976 (Centralize Reverse Plus evaluations and paper trades)
-    }
-
+    // existing evaluations / trades for idempotency
     const revIds = [...revById.keys()];
     const evalKey = new Set<string>();
     const evalInfo = new Map<string, { entry: string | null; status: string }>();
     const btDone = new Set<string>();
     const tradeByKey = new Map<string, Row>();
-
-    // Load central SIGNAL_TIME evaluations and all central PAPER trades for idempotency.
     for (let i = 0; i < revIds.length; i += 100) {
       const chunk = revIds.slice(i, i + 100);
-<<<<<<< HEAD
-      const { data: ev } = await supabase.from("reverse_plus_evaluations").select("user_id, reverse_outcome_id, eval_kind, recommended_entry, entry_status").eq("eval_kind", "SIGNAL_TIME").in("reverse_outcome_id", chunk).is("user_id", null);
+      const { data: ev } = await supabase.from("reverse_plus_evaluations").select("user_id, reverse_outcome_id, eval_kind, recommended_entry, entry_status").eq("eval_kind", "SIGNAL_TIME").eq("owner_key", CENTRAL_OWNER_KEY).eq("source", "CENTRAL").in("reverse_outcome_id", chunk).is("user_id", null);
       for (const e of ev ?? []) {
-        evalKey.add(`${PUBLIC_OWNER}|${e.reverse_outcome_id}`);
+        evalKey.add(`${CENTRAL_OWNER_KEY}|${e.reverse_outcome_id}`);
         evalInfo.set(String(e.reverse_outcome_id), { entry: e.recommended_entry === null ? null : String(e.recommended_entry), status: String(e.entry_status) });
       }
       const { data: bts } = await supabase.from("reverse_plus_backtests").select("reverse_outcome_id").eq("engine_version", BACKTEST_ENGINE_VERSION).in("reverse_outcome_id", chunk);
       for (const b of bts ?? []) btDone.add(String(b.reverse_outcome_id));
-      const { data: tr } = await supabase.from("reverse_plus_trades").select("*").eq("mode", "PAPER").in("reverse_outcome_id", chunk).is("user_id", null);
-      for (const t of tr ?? []) tradeByKey.set(`${PUBLIC_OWNER}|${t.reverse_outcome_id}`, t as Row);
-=======
-
-      const { data: ev, error: evErr } = await supabase
-        .from("reverse_plus_evaluations")
-        .select("reverse_outcome_id")
-        .is("user_id", null)
-        .eq("owner_key", CENTRAL_OWNER_KEY)
-        .eq("source", "CENTRAL")
-        .eq("eval_kind", "SIGNAL_TIME")
-        .in("reverse_outcome_id", chunk);
-
-      if (evErr) throw new Error(`central evaluations: ${evErr.message}`);
-      for (const e of ev ?? []) evalKey.add(String(e.reverse_outcome_id));
-
-      const { data: trades, error: tradesErr } = await supabase
-        .from("reverse_plus_trades")
-        .select("*")
-        .is("user_id", null)
-        .eq("owner_key", CENTRAL_OWNER_KEY)
-        .eq("mode", "PAPER")
-        .in("reverse_outcome_id", chunk);
-
-      if (tradesErr) throw new Error(`central paper trades: ${tradesErr.message}`);
-      for (const t of trades ?? []) tradeByKey.set(String(t.reverse_outcome_id), t as Row);
->>>>>>> c3df976 (Centralize Reverse Plus evaluations and paper trades)
+      const { data: tr } = await supabase.from("reverse_plus_trades").select("*").eq("mode", "PAPER").eq("owner_key", CENTRAL_OWNER_KEY).in("reverse_outcome_id", chunk).is("user_id", null);
+      for (const t of tr ?? []) tradeByKey.set(`${CENTRAL_OWNER_KEY}|${t.reverse_outcome_id}`, t as Row);
     }
 
     const futures = await loadFuturesInfo();
@@ -390,23 +274,18 @@ Deno.serve(async (req: Request) => {
       const closeMs = Date.parse(String(rev.candle_close_time));
       const key = `${rev.symbol}|${tf}|${closeMs}`;
       if (!beforeCache.has(key)) {
-        const rows = (await fetchJson(
-          `${BINANCE_BASE}/api/v3/klines?symbol=${rev.symbol}&interval=${tf}&endTime=${closeMs}&limit=${BEFORE_LIMIT}`,
-        )) as unknown[][];
+        const rows = (await fetchJson(`${BINANCE_BASE}/api/v3/klines?symbol=${rev.symbol}&interval=${tf}&endTime=${closeMs}&limit=${BEFORE_LIMIT}`)) as unknown[][];
         beforeCache.set(key, parseKlines(rows).filter((c) => c.closeTime <= closeMs));
       }
       return beforeCache.get(key)!;
     };
-
     const getAfter = async (rev: Row): Promise<Candle[]> => {
       const tf = normTf(String(rev.timeframe));
       const closeMs = Date.parse(String(rev.candle_close_time));
       const key = `${rev.symbol}|${tf}|${closeMs}`;
       if (!afterCache.has(key)) {
         const limit = Math.min(1000, (EXPIRY_BARS[tf] ?? 48) * 2 + 5);
-        const rows = (await fetchJson(
-          `${BINANCE_BASE}/api/v3/klines?symbol=${rev.symbol}&interval=${tf}&startTime=${closeMs + 1}&limit=${limit}`,
-        )) as unknown[][];
+        const rows = (await fetchJson(`${BINANCE_BASE}/api/v3/klines?symbol=${rev.symbol}&interval=${tf}&startTime=${closeMs + 1}&limit=${limit}`)) as unknown[][];
         afterCache.set(key, closedCandles(parseKlines(rows), now).filter((c) => c.closeTime > closeMs));
       }
       return afterCache.get(key)!;
@@ -444,7 +323,7 @@ Deno.serve(async (req: Request) => {
 
     const contractFor = (symbol: string): { contract: ContractSpec; available: boolean } => {
       if (quoteOf(symbol) !== "USDT") return { contract: UNKNOWN_CONTRACT, available: false };
-      if (!futures) return { contract: UNKNOWN_CONTRACT, available: true };
+      if (!futures) return { contract: UNKNOWN_CONTRACT, available: true }; // cannot verify -> estimate, flagged
       return { contract: futures.specs.get(symbol) ?? UNKNOWN_CONTRACT, available: futures.perps.has(symbol) };
     };
 
@@ -464,36 +343,26 @@ Deno.serve(async (req: Request) => {
       const targetTouched = used.length ? (side === "SELL" ? D(low) <= target : D(high) >= target) : false;
       const { contract, available } = contractFor(String(rev.symbol));
       const a = buildPlusAnalysis({
-        side, timeframe: tf, zoneLow: dec(rev.entry_low), zoneHigh: dec(rev.entry_high),
-        refEntry: decOrThrow(rev.price_at_signal), stop, target, currentPrice: price,
-        candles: [...candles, ...used], asOfCloseTime: asOfMs, ageBars,
-        expiryBars: EXPIRY_BARS[tf] ?? 48, stopTouched, targetTouched,
-        settings: s, contract, futuresAvailable: available,
+        side, timeframe: tf, zoneLow: dec(rev.entry_low), zoneHigh: dec(rev.entry_high), refEntry: decOrThrow(rev.price_at_signal),
+        stop, target, currentPrice: price, candles: [...candles, ...used], asOfCloseTime: asOfMs, ageBars,
+        expiryBars: EXPIRY_BARS[tf] ?? 48, stopTouched, targetTouched, settings: s, contract, futuresAvailable: available,
       });
       return { a, price, contractKnown: contract.known };
     };
 
-    const signals = [...revById.values()].sort(
-      (x, y) => String(y.signal_at).localeCompare(String(x.signal_at)),
-    );
-
+    // ---- per signal ---------------------------------------------------------------------------
+    const signals = [...revById.values()].sort((x, y) => String(y.signal_at).localeCompare(String(x.signal_at)));
     for (const rev of signals) {
-      if (Date.now() - t0 > BUDGET_MS) {
-        stats.skippedBudget++;
-        continue;
-      }
-
+      if (Date.now() - t0 > BUDGET_MS) { stats.skippedBudget++; continue; }
       stats.signals++;
       const tf = normTf(String(rev.timeframe));
       const tfMs = timeframeMs(tf);
       const closeMs = Date.parse(String(rev.candle_close_time));
       const expiryBars = EXPIRY_BARS[tf] ?? 48;
       const ageNow = Math.floor((now - closeMs) / tfMs);
-      const key = String(rev.id);
 
-<<<<<<< HEAD
       { // single central owner (user_id = NULL); `continue` below moves on to the next signal
-        const uid = PUBLIC_OWNER;
+        const uid = CENTRAL_OWNER_KEY;
         const key = `${uid}|${rev.id}`;
         try {
           const trade = tradeByKey.get(key);
@@ -503,29 +372,40 @@ Deno.serve(async (req: Request) => {
           const needLive = !historical && ageNow < expiryBars * 2;
           const needSim = trade && (trade.outcome === "PENDING" || trade.outcome === "OPEN");
           const needFirst = !evalKey.has(key);
+          const needPaper = !historical && !trade && evalKey.has(key);
           const needBt = historical && !btDone.has(String(rev.id));
-          if (!needFirst && !needLive && !needSim && !needBt) continue;
+          if (!needFirst && !needLive && !needSim && !needBt && !needPaper) continue;
 
-          const before = (needFirst || needLive) ? await getBefore(rev) : [];
-          if ((needFirst || needLive) && before.length < 50) { err(`${rev.symbol} ${tf}: only ${before.length} candles before the signal`); continue; }
+          const before = (needFirst || needLive || needPaper) ? await getBefore(rev) : [];
+          if ((needFirst || needLive || needPaper) && before.length < 50) { err(`${rev.symbol} ${tf}: only ${before.length} candles before the signal`); continue; }
 
-          // 1. SIGNAL_TIME evaluation (once) + PAPER trade creation --------------------------------
-          if (needFirst) {
-            const { a, price, contractKnown } = analyse(rev, s, before, closeMs, [], 0);
-            const row = evaluationRow(null, rev, "SIGNAL_TIME", closeMs, price, a, s, contractKnown);
-            const { data: ins, error } = await supabase.from("reverse_plus_evaluations")
-              .upsert(row, { onConflict: "owner_key,reverse_outcome_id,eval_kind", ignoreDuplicates: true }).select("id");
-            if (error) throw new Error(`eval insert: ${error.message}`);
-            evalKey.add(key);
-            evalInfo.set(String(rev.id), { entry: str(a.entry.recommendedEntry), status: a.status });
-            if (ins && ins.length) stats.evalCreated++;
+          // 1. SIGNAL_TIME evaluation (once) + PAPER trade creation/recovery -------------------------
+          let analysis: ReturnType<typeof analyse> | null = null;
+          let evaluationId: string | null = null;
+          if (needFirst || needPaper) {
+            analysis = analyse(rev, s, before, closeMs, [], 0);
+            if (needFirst) {
+              const row = evaluationRow(null, rev, "SIGNAL_TIME", closeMs, analysis.price, analysis.a, s, analysis.contractKnown);
+              const { data: ins, error } = await supabase.from("reverse_plus_evaluations")
+                .upsert(row, { onConflict: "owner_key,reverse_outcome_id,eval_kind", ignoreDuplicates: true }).select("id");
+              if (error) throw new Error(`eval insert: ${error.message}`);
+              evalKey.add(key);
+              evalInfo.set(String(rev.id), { entry: str(analysis.a.entry.recommendedEntry), status: analysis.a.status });
+              if (ins && ins.length) { evaluationId = String(ins[0].id); stats.evalCreated++; }
+            } else {
+              const { data: existingEval, error: existingEvalErr } = await supabase.from("reverse_plus_evaluations")
+                .select("id").eq("owner_key", CENTRAL_OWNER_KEY).eq("reverse_outcome_id", rev.id)
+                .eq("eval_kind", "SIGNAL_TIME").eq("source", "CENTRAL").is("user_id", null).maybeSingle();
+              if (existingEvalErr) throw new Error(`existing signal-time evaluation: ${existingEvalErr.message}`);
+              evaluationId = existingEval?.id ? String(existingEval.id) : null;
+            }
 
-            // historical signals (issued before public_since) only get the SIGNAL_TIME snapshot - never a PAPER trade
-            if (mayCreatePaperTrade(String(rev.signal_at), publicSince) && a.plan?.ok && a.status !== "INVALID" && a.status !== "EXPIRED" && !tradeByKey.has(key)) {
+            const a = analysis.a;
+            if (!historical && a.plan?.ok && a.status !== "INVALID" && a.status !== "EXPIRED" && !tradeByKey.has(key)) {
               const steps = a.plan.steps;
               const tradeRow: Row = {
-                user_id: null, mode: "PAPER", reverse_outcome_id: rev.id, origin_outcome_id: rev.origin_outcome_id,
-                evaluation_id: ins && ins.length ? ins[0].id : null, symbol: rev.symbol, timeframe: rev.timeframe, side: rev.signal_type,
+                user_id: null, owner_key: CENTRAL_OWNER_KEY, mode: "PAPER", reverse_outcome_id: rev.id, origin_outcome_id: rev.origin_outcome_id,
+                evaluation_id: evaluationId, symbol: rev.symbol, timeframe: rev.timeframe, side: rev.signal_type,
                 quality_score: a.quality.score, recommended_entry: str(a.entry.recommendedEntry), stop_loss: str(dec(rev.stop_loss)),
                 take_profit: str(dec(rev.target1)), leverage: str(s.leverage), margin_used: str(a.plan.totals?.margin ?? null),
                 entries_planned: steps.length, entries_filled: 0, plan: planJson(a), outcome: "PENDING", signal_at: rev.signal_at,
@@ -534,6 +414,11 @@ Deno.serve(async (req: Request) => {
                 .upsert(tradeRow, { onConflict: "owner_key,mode,reverse_outcome_id", ignoreDuplicates: true }).select("*");
               if (tErr) throw new Error(`paper trade insert: ${tErr.message}`);
               if (created && created.length) { tradeByKey.set(key, created[0] as Row); stats.tradesCreated++; }
+              else {
+                const { data: existingTrade } = await supabase.from("reverse_plus_trades").select("*")
+                  .eq("owner_key", CENTRAL_OWNER_KEY).eq("mode", "PAPER").eq("reverse_outcome_id", rev.id).is("user_id", null).maybeSingle();
+                if (existingTrade) tradeByKey.set(key, existingTrade as Row);
+              }
             }
           }
 
@@ -614,225 +499,12 @@ Deno.serve(async (req: Request) => {
           }
         } catch (e) {
           err(`${rev.symbol} ${tf} ${uid}: ${e instanceof Error ? e.message : String(e)}`);
-=======
-      try {
-        let current = tradeByKey.get(key);
-        const needFirst = !evalKey.has(key);
-        const needLive = ageNow < expiryBars * 2;
-        const needSim = !!current && (current.outcome === "PENDING" || current.outcome === "OPEN");
-
-        const needPaper = !current && evalKey.has(key);
-        if (!needFirst && !needLive && !needSim && !needPaper) continue;
-
-        const before = await getBefore(rev);
-        if (before.length < 50) {
-          err(`${rev.symbol} ${tf}: only ${before.length} candles before the signal`);
-          continue;
->>>>>>> c3df976 (Centralize Reverse Plus evaluations and paper trades)
         }
-
-        // Analyse once for evaluation and PAPER creation.
-        const { a, price, contractKnown } = analyse(rev, settings, before, closeMs, [], 0);
-
-        // 1. Shared SIGNAL_TIME evaluation, created once.
-        if (needFirst) {
-          const row = evaluationRow(null, rev, "SIGNAL_TIME", closeMs, price, a, settings, contractKnown);
-
-          const { data: inserted, error: insertErr } = await supabase
-            .from("reverse_plus_evaluations")
-            .upsert(row, {
-              onConflict: "owner_key,reverse_outcome_id,eval_kind",
-              ignoreDuplicates: true,
-            })
-            .select("id");
-
-          if (insertErr) throw new Error(`SIGNAL_TIME insert: ${insertErr.message}`);
-          evalKey.add(key);
-          if (inserted?.length) stats.evalCreated++;
-        }
-
-        // 2. Create a shared PAPER trade even when SIGNAL_TIME already exists.
-        if (
-          a.plan?.ok &&
-          a.status !== "INVALID" &&
-          a.status !== "EXPIRED" &&
-          !tradeByKey.has(key)
-        ) {
-          const { data: evaluation, error: evaluationErr } = await supabase
-            .from("reverse_plus_evaluations")
-            .select("id")
-            .is("user_id", null)
-            .eq("owner_key", CENTRAL_OWNER_KEY)
-            .eq("reverse_outcome_id", rev.id)
-            .eq("eval_kind", "SIGNAL_TIME")
-            .maybeSingle();
-
-          if (evaluationErr) throw new Error(`PAPER evaluation lookup: ${evaluationErr.message}`);
-
-          const tradeRow: Row = {
-            user_id: null,
-            owner_key: CENTRAL_OWNER_KEY,
-            mode: "PAPER",
-            reverse_outcome_id: rev.id,
-            origin_outcome_id: rev.origin_outcome_id,
-            evaluation_id: evaluation?.id ?? null,
-            symbol: rev.symbol,
-            timeframe: rev.timeframe,
-            side: rev.signal_type,
-            quality_score: a.quality.score,
-            recommended_entry: str(a.entry.recommendedEntry),
-            stop_loss: str(dec(rev.stop_loss)),
-            take_profit: str(dec(rev.target1)),
-            leverage: str(settings.leverage),
-            margin_used: str(a.plan.totals?.margin ?? null),
-            entries_planned: a.plan.steps.length,
-            entries_filled: 0,
-            plan: planJson(a),
-            outcome: "PENDING",
-            signal_at: rev.signal_at,
-          };
-
-          const { data: created, error: tradeErr } = await supabase
-            .from("reverse_plus_trades")
-            .upsert(tradeRow, {
-              onConflict: "owner_key,mode,reverse_outcome_id",
-              ignoreDuplicates: true,
-            })
-            .select("*");
-
-          if (tradeErr) throw new Error(`PAPER trade insert: ${tradeErr.message}`);
-
-          let savedTrade = created?.[0] as Row | undefined;
-
-          if (!savedTrade) {
-            const { data: existingTrade, error: existingTradeErr } = await supabase
-              .from("reverse_plus_trades")
-              .select("*")
-              .is("user_id", null)
-              .eq("owner_key", CENTRAL_OWNER_KEY)
-              .eq("mode", "PAPER")
-              .eq("reverse_outcome_id", rev.id)
-              .maybeSingle();
-
-            if (existingTradeErr) throw new Error(`existing PAPER trade: ${existingTradeErr.message}`);
-            savedTrade = existingTrade as Row | undefined;
-          }
-
-          if (savedTrade) {
-            tradeByKey.set(key, savedTrade);
-            if (created?.length) stats.tradesCreated++;
-          }
-        }
-
-        // 3. Advance only the shared PAPER trade using candles after the signal.
-        current = tradeByKey.get(key);
-        const isOpen = !!current && (current.outcome === "PENDING" || current.outcome === "OPEN");
-        const after = (needLive || isOpen) ? await getAfter(rev) : [];
-        const asOf = after.length ? after[after.length - 1].closeTime : closeMs;
-
-        if (current && (current.outcome === "PENDING" || current.outcome === "OPEN")) {
-          if (rev.status === "CANCELLED" && current.outcome === "PENDING") {
-            const { error: cancelErr } = await supabase
-              .from("reverse_plus_trades")
-              .update({ outcome: "CANCELLED", updated_at: new Date().toISOString() })
-              .eq("id", current.id)
-              .in("outcome", ["PENDING", "OPEN"]);
-
-            if (cancelErr) throw new Error(`PAPER cancellation: ${cancelErr.message}`);
-            stats.tradesUpdated++;
-            tradeByKey.set(key, { ...current, outcome: "CANCELLED" });
-          } else {
-            const plan = (current.plan as { steps?: { entry: string; qty: string }[] } | null) ?? {};
-            const steps = (plan.steps ?? []).map((x) => ({ price: D(x.entry), qty: D(x.qty) }));
-            const sim = simulatePaper({
-              side: rev.signal_type as Side,
-              steps,
-              stop: decOrThrow(rev.stop_loss),
-              target: decOrThrow(rev.target1),
-              cost: { feePct: settings.feePct, slippagePct: settings.slippagePct },
-              candlesAfter: after,
-              asOfCloseTime: asOf,
-              maxFillBars: expiryBars,
-              maxHoldBars: expiryBars,
-            });
-
-            const fillsJson = jsonSafe(sim.fills.map((f) => ({
-              price: f.price,
-              qty: f.qty,
-              time: new Date(f.time).toISOString(),
-            })));
-            const changed =
-              sim.status !== current.outcome ||
-              sim.fills.length !== Number(current.entries_filled ?? 0);
-
-            if (changed) {
-              const closed = sim.status !== "PENDING" && sim.status !== "OPEN";
-              const { error: updateErr } = await supabase
-                .from("reverse_plus_trades")
-                .update({
-                  outcome: sim.status,
-                  entries_filled: sim.fills.length,
-                  fills: fillsJson,
-                  qty_total: str(sim.qtyFilled),
-                  avg_entry: str(sim.avgEntry),
-                  exit_price: str(sim.exitPrice),
-                  exit_at: sim.exitTime ? new Date(sim.exitTime).toISOString() : null,
-                  gross_pnl: str(sim.grossPnl),
-                  fees: str(sim.fees),
-                  slippage_cost: str(sim.slippageCost),
-                  net_pnl: str(sim.netPnl),
-                  risk_at_stop: str(sim.riskAtStop),
-                  final_r: str(sim.finalR),
-                  opened_at: sim.fills.length ? new Date(sim.fills[0].time).toISOString() : null,
-                  notes: sim.notes.join(","),
-                  updated_at: new Date().toISOString(),
-                })
-                .eq("id", current.id)
-                .in("outcome", ["PENDING", "OPEN"]);
-
-              if (updateErr) throw new Error(`PAPER trade update: ${updateErr.message}`);
-              stats.tradesUpdated++;
-              tradeByKey.set(key, { ...current, outcome: sim.status });
-            }
-          }
-        }
-
-        // 4. Shared LIVE evaluation.
-        if (needLive) {
-          const ageBars = Math.max(0, Math.floor((asOf - closeMs) / tfMs));
-          const { a, price, contractKnown } = analyse(
-            rev, settings, before, asOf, after, ageBars,
-          );
-          const row = evaluationRow(null, rev, "LIVE", asOf, price, a, settings, contractKnown);
-
-          const { error: liveErr } = await supabase
-            .from("reverse_plus_evaluations")
-            .upsert(
-              { ...row, updated_at: new Date().toISOString() },
-              { onConflict: "owner_key,reverse_outcome_id,eval_kind" },
-            );
-
-          if (liveErr) throw new Error(`LIVE upsert: ${liveErr.message}`);
-          stats.liveUpserted++;
-        }
-      } catch (e) {
-        err(`${rev.symbol} ${tf}: ${e instanceof Error ? e.message : String(e)}`);
       }
     }
 
-    return json({
-      ok: true,
-      mode: requestedId ? "IMMEDIATE_SINGLE_SIGNAL" : "SCHEDULED_RECONCILIATION",
-      reverse_outcome_id: requestedId,
-      duration_ms: Date.now() - t0,
-      futures_info: futures ? "ok" : "unavailable (sizes flagged as estimates)",
-      ...stats,
-    });
+    return json({ ok: true, mode: requestedId ? "IMMEDIATE_SINGLE_SIGNAL" : "SCHEDULED_RECONCILIATION", reverse_outcome_id: requestedId, duration_ms: Date.now() - t0, futures_info: futures ? "ok" : "unavailable (sizes flagged as estimates)", ...stats });
   } catch (e) {
-    return json({
-      ok: false,
-      error: e instanceof Error ? e.message : String(e),
-      ...stats,
-    }, 500);
+    return json({ ok: false, error: e instanceof Error ? e.message : String(e), ...stats }, 500);
   }
 });

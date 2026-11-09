@@ -9,13 +9,8 @@ import { Metric, Chip, Pill, PillRow, TimeStamp } from '@/components/Responsive'
 import { formatPrice, formatNumber, formatPercent } from '@/i18n/format';
 import { fetchReverseOutcomes, type ReverseOutcome } from '@/services/reverseOutcomeService';
 import {
-<<<<<<< HEAD
   DEFAULT_PLUS_SETTINGS, deleteActualTrade, fetchEvaluations, fetchBacktests, fetchPlusSettings, fetchPlusTrades, fetchPublicConfig, savePlusSettings, saveActualTrade,
   type PlusBacktest, type PlusEvaluation, type PlusPersonalSettings, type PlusPublicConfig, type PlusSettingsRow, type PlusTrade,
-=======
-  DEFAULT_PLUS_SETTINGS, deleteActualTrade, fetchEvaluations, fetchPlusSettings, fetchPlusPublicSince, fetchPlusTrades, savePlusSettings, saveActualTrade,
-  type PlusEvaluation, type PlusSettingsRow, type PlusTrade,
->>>>>>> c3df976 (Centralize Reverse Plus evaluations and paper trades)
 } from '@/services/reversePlusService';
 import {
   D, visibleTrades, compareModes, computeActual, computePlusStats, div, isHistoricalSignal, jsonSafe, mul, sum, toNumber, toString,
@@ -37,14 +32,13 @@ export function ReversePlusPage() {
   const { t } = useSettings();
   const { user, loading: authLoading } = useAuth();
   const navigate = useNavigate();
+  const openEvaluation = useCallback((e: PlusEvaluation) => {
+    navigate(`/asset/${encodeURIComponent(e.symbol)}?tf=${encodeURIComponent(e.timeframe)}&outcome=${encodeURIComponent(e.reverse_outcome_id)}&reverse=1`);
+  }, [navigate]);
   const [tab, setTab] = useState<Tab>('analysis');
   const [settings, setSettings] = useState<PlusSettingsRow | null>(null);
-<<<<<<< HEAD
   const [backtests, setBacktests] = useState<PlusBacktest[]>([]);
   const [config, setConfig] = useState<PlusPublicConfig | null>(null);
-=======
-  const [publicSince, setPublicSince] = useState<string | null>(null);
->>>>>>> c3df976 (Centralize Reverse Plus evaluations and paper trades)
   const [evals, setEvals] = useState<PlusEvaluation[]>([]);
   const [historyEvals, setHistoryEvals] = useState<PlusEvaluation[]>([]);
   const [trades, setTrades] = useState<PlusTrade[]>([]);
@@ -56,15 +50,9 @@ export function ReversePlusPage() {
     setLoading(true);
     setError(null);
     try {
-<<<<<<< HEAD
       const [s, cfg, e, h, tr, rv, bts] = await Promise.all([
         fetchPlusSettings(),
         fetchPublicConfig(),
-=======
-      const [s, ps, e, h, tr, rv] = await Promise.all([
-        fetchPlusSettings(),
-        fetchPlusPublicSince(),
->>>>>>> c3df976 (Centralize Reverse Plus evaluations and paper trades)
         fetchEvaluations('LIVE', 150),
         fetchEvaluations('SIGNAL_TIME', 3000),
         fetchPlusTrades(),
@@ -73,11 +61,7 @@ export function ReversePlusPage() {
       ]);
       setBacktests(bts);
       setSettings(s);
-<<<<<<< HEAD
       setConfig(cfg);
-=======
-      setPublicSince(ps);
->>>>>>> c3df976 (Centralize Reverse Plus evaluations and paper trades)
       setEvals(e);
       setHistoryEvals(h);
       setTrades(visibleTrades(tr, user?.id ?? null));
@@ -111,24 +95,9 @@ export function ReversePlusPage() {
     return <div className="space-y-6">{header}<Card><button className="btn-primary text-sm" onClick={() => navigate('/login')}>{t('signIn')}</button></Card></div>;
   }
 
-<<<<<<< HEAD
   // Public model: everybody sees the same central rows. Signals issued before the central pipeline started
   // (config.public_since) are historical: SIGNAL_TIME snapshot only, no PAPER / LIVE trade.
   const historicalEvals = historyEvals.filter((e) => isHistoricalSignal(e.signal_at, config?.public_since));
-=======
-  // Shared historical boundary: public activation time, identical for every user.
-  const historicalEvals = publicSince
-    ? historyEvals.filter((e) =>
-        !!e.signal_at && new Date(e.signal_at).getTime() < new Date(publicSince).getTime()
-      )
-    : [];
->>>>>>> c3df976 (Centralize Reverse Plus evaluations and paper trades)
-
-  const openEvaluation = (e: PlusEvaluation) => {
-    navigate(
-      `/asset/${encodeURIComponent(e.symbol)}?tf=${encodeURIComponent(e.timeframe)}&outcome=${encodeURIComponent(e.reverse_outcome_id)}&reverse=1`
-    );
-  };
 
   const tabs: { key: Tab; label: string }[] = [
     { key: 'analysis', label: 'مرکز تحلیل' },
@@ -146,14 +115,9 @@ export function ReversePlusPage() {
       <PillRow>{tabs.map((x) => <Pill key={x.key} active={tab === x.key} onClick={() => setTab(x.key)}>{x.label}</Pill>)}</PillRow>
       {loading ? <LoadingSpinner /> : error ? <ErrorState message={error} onRetry={() => void load()} /> : (
         <>
-<<<<<<< HEAD
           {tab === 'analysis' && <ReversePlusAnalysis backtests={backtests} evals={historyEvals} liveEvals={evals} trades={trades} cfg={config} />}
-          {tab === 'signals' && <SignalsTab evals={evals} />}
-          {tab === 'history' && <HistoryTab evals={historicalEvals} publicSince={config?.public_since ?? null} />}
-=======
           {tab === 'signals' && <SignalsTab evals={evals} onOpen={openEvaluation} />}
-          {tab === 'history' && <HistoryTab evals={historicalEvals} publicSince={publicSince} onOpen={openEvaluation} />}
->>>>>>> c3df976 (Centralize Reverse Plus evaluations and paper trades)
+          {tab === 'history' && <HistoryTab evals={historicalEvals} publicSince={config?.public_since ?? null} onOpen={openEvaluation} />}
           {tab === 'trades' && <TradesTab trades={trades} evals={evals} settings={settings} userId={user!.id} onChanged={load} />}
           {tab === 'performance' && <PerformanceTab trades={trades} reverse={reverse} />}
           {tab === 'settings' && <SettingsTab settings={settings} userId={user!.id} onSaved={setSettings} />}
@@ -168,11 +132,7 @@ export function ReversePlusPage() {
 // ------------------------------------------------------------------------------------------------
 // Historical backtest: read-only SIGNAL_TIME evaluations created before Reverse Plus activation.
 // These rows are deliberately kept separate from LIVE signals and actual-trade entry selection.
-<<<<<<< HEAD
-function HistoryTab({ evals, publicSince }: { evals: PlusEvaluation[]; publicSince: string | null }) {
-=======
 function HistoryTab({ evals, publicSince, onOpen }: { evals: PlusEvaluation[]; publicSince: string | null; onOpen: (e: PlusEvaluation) => void }) {
->>>>>>> c3df976 (Centralize Reverse Plus evaluations and paper trades)
   const { lang } = useSettings();
   const [query, setQuery] = useState('');
   const [timeframe, setTimeframe] = useState('ALL');
@@ -274,11 +234,7 @@ function HistoryTab({ evals, publicSince, onOpen }: { evals: PlusEvaluation[]; p
         </div>
         {publicSince && (
           <p className="text-[10px] text-slate-500">
-<<<<<<< HEAD
             مرز تفکیک سوابق تاریخی: پیش از شروع پردازش مرکزی Reverse Plus (برای همه کاربران یکسان است)
-=======
-            مرز مشترک سوابق تاریخی: پیش از فعال‌سازی عمومی Reverse Plus
->>>>>>> c3df976 (Centralize Reverse Plus evaluations and paper trades)
           </p>
         )}
       </Card>
@@ -289,7 +245,7 @@ function HistoryTab({ evals, publicSince, onOpen }: { evals: PlusEvaluation[]; p
         <div className="space-y-3">
           {visible.map((e) => (
             <div key={e.id} className="space-y-1">
-              <EvalCard e={e} onOpen={() => onOpen(e)} />
+              <EvalCard e={e} onOpen={onOpen} />
               <div className="px-1 flex justify-between gap-2 text-[10px] text-slate-500">
                 <span>زمان سیگنال: <TimeStamp value={e.signal_at} compact /></span>
                 <span>تاریخی · فقط جهت بک‌تست</span>
@@ -311,19 +267,14 @@ function HistoryTab({ evals, publicSince, onOpen }: { evals: PlusEvaluation[]; p
 }
 
 // ------------------------------------------------------------------------------------------------
-<<<<<<< HEAD
-function SignalsTab({ evals }: { evals: PlusEvaluation[] }) {
-=======
 function SignalsTab({ evals, onOpen }: { evals: PlusEvaluation[]; onOpen: (e: PlusEvaluation) => void }) {
->>>>>>> c3df976 (Centralize Reverse Plus evaluations and paper trades)
   const { t } = useSettings();
   if (evals.length === 0) return <EmptyState message={t('rpNoData')} />;
-  return <div className="space-y-3">{evals.map((e) => <EvalCard key={e.id} e={e} onOpen={() => onOpen(e)} />)}</div>;
+  return <div className="space-y-3">{evals.map((e) => <EvalCard key={e.id} e={e} onOpen={onOpen} />)}</div>;
 }
 
-function EvalCard({ e, onOpen }: { e: PlusEvaluation; onOpen: () => void }) {
+function EvalCard({ e, onOpen }: { e: PlusEvaluation; onOpen: (e: PlusEvaluation) => void }) {
   const { t, lang } = useSettings();
-  const navigate = useNavigate();
   const [open, setOpen] = useState(false);
   const p = (v: number | null) => (v === null ? '—' : formatPrice(v, lang));
   const steps = e.plan?.steps ?? [];
@@ -362,11 +313,8 @@ function EvalCard({ e, onOpen }: { e: PlusEvaluation; onOpen: () => void }) {
       {e.status_reasons.length > 0 && (
         <ul className="mt-2 text-xs text-slate-400 list-disc ps-5">{e.status_reasons.map((r) => <li key={r}>{t(`rpReason${r}`) === `rpReason${r}` ? r : t(`rpReason${r}`)}</li>)}</ul>
       )}
-      <button className="btn-secondary text-xs mt-2" onClick={() => navigate(`/reverse-plus/signal/${e.reverse_outcome_id}`)}>نمودار و تحلیل کامل ←</button>
+      <button className="btn-secondary text-xs mt-2" onClick={() => onOpen(e)}>نمودار و تحلیل کامل ←</button>
       <p className="text-[11px] text-slate-500 mt-2">{t('rpRrBasis')}</p>
-      <button className="btn-secondary text-xs mt-3" onClick={onOpen}>
-        نمودار و تحلیل کامل سیگنال
-      </button>
       <button className="text-xs text-primary-400 mt-2" onClick={() => setOpen(!open)}>{open ? '▲' : '▼'} {t('rpWhy')} / {t('rpSteps')}</button>
       {open && (
         <div className="mt-3 space-y-4">
