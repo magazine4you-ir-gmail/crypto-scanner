@@ -69,11 +69,35 @@ export async function fetchKlines(symbol: string, interval: Timeframe, limit = 3
 
 /**
  * Real klines for a time window (used by Reverse Plus to show what happened after a historical signal).
- * Direct Binance call (the cached `market-data` proxy has no start/end support). Includes the forming candle.
+ * Uses the Supabase market-data Gateway for historical ranges, with direct Binance fallback. Includes the forming candle.
  */
 export async function fetchKlinesRange(symbol: string, interval: Timeframe, startTime: number, endTime: number, limit = 1000): Promise<Candle[]> {
+  const params = {
+    symbol,
+    interval,
+    startTime: Math.floor(startTime),
+    endTime: Math.floor(endTime),
+    limit,
+  };
+
+  // Prefer the Supabase Gateway so historical replay does not depend on
+  // direct browser access to Binance.
+  const proxied = await viaProxy<{ candles: Candle[] }>('klines', params);
+  if (proxied && Array.isArray(proxied.candles)) {
+    return proxied.candles;
+  }
+
+  // Fallback for environments where the authenticated proxy is unavailable.
+  const query = new URLSearchParams({
+    symbol,
+    interval,
+    startTime: String(params.startTime),
+    endTime: String(params.endTime),
+    limit: String(limit),
+  });
+
   const data = await fetchJson<unknown[][]>(
-    `${BINANCE_BASE}/api/v3/klines?symbol=${symbol}&interval=${interval}&startTime=${Math.floor(startTime)}&endTime=${Math.floor(endTime)}&limit=${limit}`,
+    `${BINANCE_BASE}/api/v3/klines?${query.toString()}`,
   );
   return parseKlines(data);
 }

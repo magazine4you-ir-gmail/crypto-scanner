@@ -110,8 +110,31 @@ async function handleKlines(params: URLSearchParams) {
   const limitRaw = Number(params.get("limit") ?? "300");
   const limit = Number.isFinite(limitRaw) ? Math.min(Math.max(Math.trunc(limitRaw), 1), 1000) : 300;
 
-  const url = `${BINANCE_BASE}/api/v3/klines?symbol=${symbol}&interval=${interval}&limit=${limit}`;
-  const cacheKey = `klines:${symbol}:${interval}:${limit}`;
+  const startRaw = params.get("startTime");
+  const endRaw = params.get("endTime");
+  const startTime = startRaw === null ? null : Number(startRaw);
+  const endTime = endRaw === null ? null : Number(endRaw);
+
+  if (startRaw !== null && (!Number.isSafeInteger(startTime) || startTime! < 0)) {
+    return badRequest("invalid startTime");
+  }
+  if (endRaw !== null && (!Number.isSafeInteger(endTime) || endTime! < 0)) {
+    return badRequest("invalid endTime");
+  }
+  if (startTime !== null && endTime !== null && startTime > endTime) {
+    return badRequest("startTime must be <= endTime");
+  }
+
+  const query = new URLSearchParams({
+    symbol,
+    interval,
+    limit: String(limit),
+  });
+  if (startTime !== null) query.set("startTime", String(startTime));
+  if (endTime !== null) query.set("endTime", String(endTime));
+
+  const url = `${BINANCE_BASE}/api/v3/klines?${query.toString()}`;
+  const cacheKey = `klines:${symbol}:${interval}:${limit}:${startTime ?? ""}:${endTime ?? ""}`;
   const { data, fromCache } = await cachedFetch("binance", cacheKey, TTL.klines, url);
 
   const candles = (data as unknown[][]).map((row) => ({
