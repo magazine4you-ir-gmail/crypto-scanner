@@ -16,7 +16,7 @@ Original signal, `reversePlan`, entry zone, support/resistance, reverse stop / t
 | Edge Function (own schedule) | `supabase/functions/reverse-plus-eval/index.ts` |
 | Tables (new, no FK to old ones) | `reverse_plus_settings`, `reverse_plus_evaluations`, `reverse_plus_trades` |
 | UI | `src/pages/ReversePlusPage.tsx`, `src/services/reversePlusService.ts`, `src/i18n/reversePlusTranslations.ts` (fa/en) |
-| Switch | `VITE_REVERSE_PLUS_ENABLED=false` (UI) · `REVERSE_PLUS_ENABLED=false` (function) · per-user `enabled` |
+| Switch | `VITE_REVERSE_PLUS_ENABLED=false` (UI) · `REVERSE_PLUS_ENABLED=false` (function). Per-user `enabled` is LEGACY and no longer gates anything |
 
 ## Rules implemented
 * **Entry zone ≠ stop.** Candidates are sampled only inside the stored zone; RR is computed per candidate; the best net-RR
@@ -35,13 +35,17 @@ Original signal, `reversePlan`, entry zone, support/resistance, reverse stop / t
   at the open; a target touched in the candle of a fill is ignored; target before fill → NO_FILL.
 * **Actual trading:** manual record of real fills/exit/fees; PnL and R computed exactly. PAPER and ACTUAL are never merged.
 * **Idempotency:** unique indexes + `upsert ... ignoreDuplicates`; SIGNAL_TIME evaluations are write-once.
-* **Forward-only:** only signals created after the user enabled the module are evaluated.
+* **Public / central model (migration 20261109000000):** one evaluation per signal with the reference config in
+  `reverse_plus_public_config`, stored with `user_id = NULL` and readable by every signed-in user. Signals issued before
+  `public_since` are historical: SIGNAL_TIME snapshot only, never a PAPER trade. `reverse_plus_settings` is personal only
+  (used for the user's own ACTUAL records) and never changes public results. Legacy per-user rows are kept untouched.
+  RLS test: `supabase/tests/reverse_plus_public_rls.sql`.
 
 ## Deploy
-1. Apply the 3 migrations `supabase/migrations/20261101*_reverse_plus_*.sql` (rollback: `supabase/rollback/reverse_plus_down.sql`).
+1. Apply the migrations `supabase/migrations/20261101*_reverse_plus_*.sql` and `20261109000000_reverse_plus_public.sql` (rollback: `supabase/rollback/reverse_plus_down.sql`).
 2. `supabase functions deploy reverse-plus-eval --no-verify-jwt`
 3. Edit and run `supabase/reverse_plus_cron_setup.sql` (separate job; the old cron is untouched).
-4. Open **Reverse Signal Plus → Settings**, tick *Enable module*, save.
+4. No user action is needed: signals appear for everybody after the first run.
 5. First run manually: `curl -X POST -H "x-cron-secret: $CRON_SECRET" https://<ref>.supabase.co/functions/v1/reverse-plus-eval`
 
 ## Known limitations (be aware)
