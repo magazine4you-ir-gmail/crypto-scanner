@@ -184,18 +184,49 @@ export async function savePlusSettings(userId: string, patch: Partial<PlusPerson
   return data as PlusSettingsRow;
 }
 
-export async function fetchEvaluations(kind: 'LIVE' | 'SIGNAL_TIME' = 'LIVE', limit = 150): Promise<PlusEvaluation[]> {
-  const { data, error } = await supabase
-    .from('reverse_plus_evaluations')
-    .select('*')
-    .is('user_id', null) // central (public) rows: identical for every user
-    .eq('owner_key', REVERSE_PLUS_CENTRAL_OWNER)
-    .eq('source', 'CENTRAL')
-    .eq('eval_kind', kind)
-    .order('signal_at', { ascending: false })
-    .limit(limit);
-  if (error) throw new Error(error.message);
-  return (data ?? []) as PlusEvaluation[];
+/**
+ * Supabase / PostgREST caps every response at `max_rows` (default 1000), so `.limit(3000)` alone silently returns
+ * at most 1000 rows. This helper reads the rows in pages of 1000 (`.range`) until `limit` rows are collected or the
+ * table is exhausted.
+ */
+const PAGE_SIZE = 1000;
+
+async function fetchAllPages<T>(
+  limit: number,
+  page: (from: number, to: number) => PromiseLike<{ data: unknown[] | null; error: { message: string } | null }>,
+): Promise<T[]> {
+  const out: T[] = [];
+  for (let from = 0; from < limit; from += PAGE_SIZE) {
+    const to = Math.min(from + PAGE_SIZE, limit) - 1;
+    const { data, error } = await page(from, to);
+    if (error) throw new Error(error.message);
+    const rows = (data ?? []) as T[];
+    out.push(...rows);
+    if (rows.length < to - from + 1) break; // last page reached
+  }
+  return out;
+}
+
+export async function fetchEvaluations(
+  kind: 'LIVE' | 'SIGNAL_TIME' = 'LIVE',
+  limit = 150,
+  opts: { before?: string | null } = {},
+): Promise<PlusEvaluation[]> {
+  return fetchAllPages<PlusEvaluation>(limit, (from, to) => {
+    let q = supabase
+      .from('reverse_plus_evaluations')
+      .select('*')
+      .is('user_id', null) // central (public) rows: identical for every user
+      .eq('owner_key', REVERSE_PLUS_CENTRAL_OWNER)
+      .eq('source', 'CENTRAL')
+      .eq('eval_kind', kind);
+    // optional server-side boundary (e.g. public_since -> only historical signals)
+    if (opts.before) q = q.lt('signal_at', opts.before);
+    return q
+      .order('signal_at', { ascending: false })
+      .order('id', { ascending: false }) // stable order across pages
+      .range(from, to);
+  });
 }
 
 /** Central historical backtest row (raw facts; leverage / PnL are derived in the browser by the pure engine). */
@@ -228,9 +259,14 @@ export interface PlusBacktest {
 }
 
 export async function fetchBacktests(limit = 3000): Promise<PlusBacktest[]> {
-  const { data, error } = await supabase.from('reverse_plus_backtests').select('*').order('signal_at', { ascending: false }).limit(limit);
-  if (error) throw new Error(error.message);
-  return (data ?? []) as PlusBacktest[];
+  return fetchAllPages<PlusBacktest>(limit, (from, to) =>
+    supabase
+      .from('reverse_plus_backtests')
+      .select('*')
+      .order('signal_at', { ascending: false })
+      .order('id', { ascending: false }) // stable order across pages
+      .range(from, to),
+  );
 }
 
 export async function fetchBacktestFor(reverseOutcomeId: string): Promise<PlusBacktest | null> {
