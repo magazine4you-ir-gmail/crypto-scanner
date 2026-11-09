@@ -9,8 +9,9 @@ import { supabase } from './supabaseClient';
 
 export interface PlusSettingsRow {
   user_id: string;
-  enabled: boolean;
-  enabled_at: string | null;
+  /** LEGACY: no longer controls visibility or processing. Kept only so old rows keep their value. */
+  enabled?: boolean;
+  enabled_at?: string | null;
   account_balance: number;
   risk_pct: number;
   max_risk_per_trade: number;
@@ -26,8 +27,10 @@ export interface PlusSettingsRow {
   approach_pct: number;
 }
 
-export const DEFAULT_PLUS_SETTINGS: Omit<PlusSettingsRow, 'user_id' | 'enabled_at'> = {
-  enabled: false,
+/** Personal parameters only (balance, risk, leverage, fees ...). They never affect the public signals / evaluations. */
+export type PlusPersonalSettings = Omit<PlusSettingsRow, 'user_id' | 'enabled' | 'enabled_at'>;
+
+export const DEFAULT_PLUS_SETTINGS: PlusPersonalSettings = {
   account_balance: 100,
   risk_pct: 1,
   max_risk_per_trade: 1,
@@ -62,6 +65,7 @@ export interface PlanStepRow {
 
 export interface PlusEvaluation {
   id: string;
+  user_id?: string | null;
   reverse_outcome_id: string;
   origin_outcome_id: string | null;
   symbol: string;
@@ -101,6 +105,7 @@ export interface PlusEvaluation {
   plan: { steps?: PlanStepRow[]; issues?: string[]; estimated?: boolean } | null;
   plan_issues: string[];
   contract_known: boolean | null;
+  source?: 'CENTRAL' | 'LEGACY_USER_COPY';
   signal_at: string | null;
 }
 
@@ -108,6 +113,8 @@ export type PlusOutcome = 'PENDING' | 'OPEN' | 'WIN' | 'LOSS' | 'EXPIRED' | 'BRE
 
 export interface PlusTrade {
   id: string;
+  /** null = central (public) PAPER trade; set = the owner's own ACTUAL (or legacy) row */
+  user_id: string | null;
   mode: 'PAPER' | 'ACTUAL';
   reverse_outcome_id: string;
   origin_outcome_id: string | null;
@@ -141,7 +148,29 @@ export async function fetchPlusSettings(): Promise<PlusSettingsRow | null> {
   return (data as PlusSettingsRow | null) ?? null;
 }
 
-export async function savePlusSettings(userId: string, patch: Partial<PlusSettingsRow>): Promise<PlusSettingsRow> {
+/** Public reference configuration used by the central evaluator (read-only for users). */
+export interface PlusPublicConfig {
+  public_since: string;
+  assumed_mmr_pct: number;
+  liq_safety_factor: number;
+  approach_pct: number;
+  account_balance: number;
+  risk_pct: number;
+  max_risk_per_trade: number;
+  leverage: number;
+  fee_pct: number;
+  slippage_pct: number;
+  min_rr: number;
+}
+
+export async function fetchPublicConfig(): Promise<PlusPublicConfig | null> {
+  const { data, error } = await supabase.from('reverse_plus_public_config').select('*').maybeSingle();
+  if (error) throw new Error(error.message);
+  return (data as PlusPublicConfig | null) ?? null;
+}
+
+export async function savePlusSettings(userId: string, patch: Partial<PlusPersonalSettings>): Promise<PlusSettingsRow> {
+  // `enabled` / `enabled_at` are deliberately never written from the browser any more.
   const { data, error } = await supabase
     .from('reverse_plus_settings')
     .upsert({ ...DEFAULT_PLUS_SETTINGS, ...patch, user_id: userId }, { onConflict: 'user_id' })
@@ -155,6 +184,7 @@ export async function fetchEvaluations(kind: 'LIVE' | 'SIGNAL_TIME' = 'LIVE', li
   const { data, error } = await supabase
     .from('reverse_plus_evaluations')
     .select('*')
+    .is('user_id', null) // central (public) rows: identical for every user
     .eq('eval_kind', kind)
     .order('signal_at', { ascending: false })
     .limit(limit);
@@ -162,10 +192,61 @@ export async function fetchEvaluations(kind: 'LIVE' | 'SIGNAL_TIME' = 'LIVE', li
   return (data ?? []) as PlusEvaluation[];
 }
 
+/** Central historical backtest row (raw facts; leverage / PnL are derived in the browser by the pure engine). */
+export interface PlusBacktest {
+  id: string;
+  reverse_outcome_id: string;
+  symbol: string;
+  timeframe: string;
+  side: 'BUY' | 'SELL';
+  signal_at: string | null;
+  signal_close_time: string;
+  entry_level: number;
+  stop_loss: number;
+  take_profit: number;
+  strategy_status: string | null;
+  outcome: 'WIN' | 'LOSS' | 'BREAKEVEN' | 'NO_ENTRY' | 'EXPIRED' | 'AMBIGUOUS' | 'UNKNOWN';
+  reason: string;
+  entry_time: string | null;
+  entry_price: number | null;
+  exit_time: string | null;
+  exit_price: number | null;
+  exit_reason: 'TARGET' | 'STOP' | null;
+  bars_to_entry: number | null;
+  bars_held: number | null;
+  worst_price: number | null;
+  best_price: number | null;
+  candles_used: number;
+  lower_tf_used: boolean;
+  engine_version: string;
+}
+
+export async function fetchBacktests(limit = 3000): Promise<PlusBacktest[]> {
+  const { data, error } = await supabase.from('reverse_plus_backtests').select('*').order('signal_at', { ascending: false }).limit(limit);
+  if (error) throw new Error(error.message);
+  return (data ?? []) as PlusBacktest[];
+}
+
+export async function fetchBacktestFor(reverseOutcomeId: string): Promise<PlusBacktest | null> {
+  const { data, error } = await supabase.from('reverse_plus_backtests').select('*').eq('reverse_outcome_id', reverseOutcomeId).maybeSingle();
+  if (error) throw new Error(error.message);
+  return (data as PlusBacktest | null) ?? null;
+}
+
+/** Central SIGNAL_TIME + LIVE evaluations of one signal. */
+export async function fetchEvaluationsFor(reverseOutcomeId: string): Promise<{ signalTime: PlusEvaluation | null; live: PlusEvaluation | null }> {
+  const { data, error } = await supabase.from('reverse_plus_evaluations').select('*').is('user_id', null).eq('reverse_outcome_id', reverseOutcomeId);
+  if (error) throw new Error(error.message);
+  const rows = (data ?? []) as PlusEvaluation[];
+  return { signalTime: rows.find((r) => r.eval_kind === 'SIGNAL_TIME') ?? null, live: rows.find((r) => r.eval_kind === 'LIVE') ?? null };
+}
+
 export async function fetchPlusTrades(limit = 500): Promise<PlusTrade[]> {
   const { data, error } = await supabase
     .from('reverse_plus_trades')
     .select('*')
+    // central PAPER rows (user_id null) + the signed-in user's own ACTUAL rows (RLS already hides other users' rows)
+    .or('and(user_id.is.null,mode.eq.PAPER),mode.eq.ACTUAL')
     .order('signal_at', { ascending: false })
     .limit(limit);
   if (error) throw new Error(error.message);
