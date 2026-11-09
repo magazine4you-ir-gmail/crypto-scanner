@@ -57,7 +57,7 @@ export function ReversePlusPage() {
         fetchEvaluations('SIGNAL_TIME', 3000),
         fetchPlusTrades(),
         fetchReverseOutcomes(400).catch(() => []),
-        fetchBacktests(3000).catch(() => [] as PlusBacktest[]),
+        fetchBacktests(3000),
       ]);
       setBacktests(bts);
       setSettings(s);
