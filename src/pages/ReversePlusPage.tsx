@@ -32,6 +32,9 @@ export function ReversePlusPage() {
   const { t } = useSettings();
   const { user, loading: authLoading } = useAuth();
   const navigate = useNavigate();
+  const openEvaluation = useCallback((e: PlusEvaluation) => {
+    navigate(`/asset/${encodeURIComponent(e.symbol)}?tf=${encodeURIComponent(e.timeframe)}&outcome=${encodeURIComponent(e.reverse_outcome_id)}&reverse=1`);
+  }, [navigate]);
   const [tab, setTab] = useState<Tab>('analysis');
   const [settings, setSettings] = useState<PlusSettingsRow | null>(null);
   const [backtests, setBacktests] = useState<PlusBacktest[]>([]);
@@ -113,8 +116,8 @@ export function ReversePlusPage() {
       {loading ? <LoadingSpinner /> : error ? <ErrorState message={error} onRetry={() => void load()} /> : (
         <>
           {tab === 'analysis' && <ReversePlusAnalysis backtests={backtests} evals={historyEvals} liveEvals={evals} trades={trades} cfg={config} />}
-          {tab === 'signals' && <SignalsTab evals={evals} />}
-          {tab === 'history' && <HistoryTab evals={historicalEvals} publicSince={config?.public_since ?? null} />}
+          {tab === 'signals' && <SignalsTab evals={evals} onOpen={openEvaluation} />}
+          {tab === 'history' && <HistoryTab evals={historicalEvals} publicSince={config?.public_since ?? null} onOpen={openEvaluation} />}
           {tab === 'trades' && <TradesTab trades={trades} evals={evals} settings={settings} userId={user!.id} onChanged={load} />}
           {tab === 'performance' && <PerformanceTab trades={trades} reverse={reverse} />}
           {tab === 'settings' && <SettingsTab settings={settings} userId={user!.id} onSaved={setSettings} />}
@@ -129,7 +132,7 @@ export function ReversePlusPage() {
 // ------------------------------------------------------------------------------------------------
 // Historical backtest: read-only SIGNAL_TIME evaluations created before Reverse Plus activation.
 // These rows are deliberately kept separate from LIVE signals and actual-trade entry selection.
-function HistoryTab({ evals, publicSince }: { evals: PlusEvaluation[]; publicSince: string | null }) {
+function HistoryTab({ evals, publicSince, onOpen }: { evals: PlusEvaluation[]; publicSince: string | null; onOpen: (e: PlusEvaluation) => void }) {
   const { lang } = useSettings();
   const [query, setQuery] = useState('');
   const [timeframe, setTimeframe] = useState('ALL');
@@ -242,7 +245,7 @@ function HistoryTab({ evals, publicSince }: { evals: PlusEvaluation[]; publicSin
         <div className="space-y-3">
           {visible.map((e) => (
             <div key={e.id} className="space-y-1">
-              <EvalCard e={e} />
+              <EvalCard e={e} onOpen={onOpen} />
               <div className="px-1 flex justify-between gap-2 text-[10px] text-slate-500">
                 <span>زمان سیگنال: <TimeStamp value={e.signal_at} compact /></span>
                 <span>تاریخی · فقط جهت بک‌تست</span>
@@ -264,15 +267,14 @@ function HistoryTab({ evals, publicSince }: { evals: PlusEvaluation[]; publicSin
 }
 
 // ------------------------------------------------------------------------------------------------
-function SignalsTab({ evals }: { evals: PlusEvaluation[] }) {
+function SignalsTab({ evals, onOpen }: { evals: PlusEvaluation[]; onOpen: (e: PlusEvaluation) => void }) {
   const { t } = useSettings();
   if (evals.length === 0) return <EmptyState message={t('rpNoData')} />;
-  return <div className="space-y-3">{evals.map((e) => <EvalCard key={e.id} e={e} />)}</div>;
+  return <div className="space-y-3">{evals.map((e) => <EvalCard key={e.id} e={e} onOpen={onOpen} />)}</div>;
 }
 
-function EvalCard({ e }: { e: PlusEvaluation }) {
+function EvalCard({ e, onOpen }: { e: PlusEvaluation; onOpen: (e: PlusEvaluation) => void }) {
   const { t, lang } = useSettings();
-  const navigate = useNavigate();
   const [open, setOpen] = useState(false);
   const p = (v: number | null) => (v === null ? '—' : formatPrice(v, lang));
   const steps = e.plan?.steps ?? [];
@@ -311,7 +313,7 @@ function EvalCard({ e }: { e: PlusEvaluation }) {
       {e.status_reasons.length > 0 && (
         <ul className="mt-2 text-xs text-slate-400 list-disc ps-5">{e.status_reasons.map((r) => <li key={r}>{t(`rpReason${r}`) === `rpReason${r}` ? r : t(`rpReason${r}`)}</li>)}</ul>
       )}
-      <button className="btn-secondary text-xs mt-2" onClick={() => navigate(`/reverse-plus/signal/${e.reverse_outcome_id}`)}>نمودار و تحلیل کامل ←</button>
+      <button className="btn-secondary text-xs mt-2" onClick={() => onOpen(e)}>نمودار و تحلیل کامل ←</button>
       <p className="text-[11px] text-slate-500 mt-2">{t('rpRrBasis')}</p>
       <button className="text-xs text-primary-400 mt-2" onClick={() => setOpen(!open)}>{open ? '▲' : '▼'} {t('rpWhy')} / {t('rpSteps')}</button>
       {open && (
