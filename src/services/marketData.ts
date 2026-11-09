@@ -67,6 +67,17 @@ export async function fetchKlines(symbol: string, interval: Timeframe, limit = 3
   return parseKlines(data);
 }
 
+/**
+ * Real klines for a time window (used by Reverse Plus to show what happened after a historical signal).
+ * Direct Binance call (the cached `market-data` proxy has no start/end support). Includes the forming candle.
+ */
+export async function fetchKlinesRange(symbol: string, interval: Timeframe, startTime: number, endTime: number, limit = 1000): Promise<Candle[]> {
+  const data = await fetchJson<unknown[][]>(
+    `${BINANCE_BASE}/api/v3/klines?symbol=${symbol}&interval=${interval}&startTime=${Math.floor(startTime)}&endTime=${Math.floor(endTime)}&limit=${limit}`,
+  );
+  return parseKlines(data);
+}
+
 export async function fetchKlinesValidated(
   symbol: string,
   interval: Timeframe,
