@@ -33,7 +33,7 @@ export function ReversePlusPage() {
   const { user, loading: authLoading } = useAuth();
   const navigate = useNavigate();
   const openEvaluation = useCallback((e: PlusEvaluation) => {
-    navigate(`/asset/${encodeURIComponent(e.symbol)}?tf=${encodeURIComponent(e.timeframe)}&outcome=${encodeURIComponent(e.reverse_outcome_id)}&reverse=1`);
+    navigate(`/reverse-plus/signal/${encodeURIComponent(e.reverse_outcome_id)}`);
   }, [navigate]);
   const [tab, setTab] = useState<Tab>('analysis');
   const [settings, setSettings] = useState<PlusSettingsRow | null>(null);
