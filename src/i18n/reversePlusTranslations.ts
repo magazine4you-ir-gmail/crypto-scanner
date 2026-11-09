@@ -11,10 +11,9 @@ export const reversePlusTranslations: Dict = {
   rpTrades: { fa: 'معاملات', en: 'Trades' },
   rpPerformance: { fa: 'عملکرد', en: 'Performance' },
   rpSettings: { fa: 'تنظیمات', en: 'Settings' },
-  rpEnabled: { fa: 'فعال‌سازی ماژول', en: 'Enable module' },
-  rpEnabledHint: {
-    fa: 'فقط سیگنال‌هایی که بعد از فعال‌سازی ثبت شوند ارزیابی می‌شوند (بدون بک‌فیل با دانش آینده).',
-    en: 'Only signals created AFTER enabling are evaluated (no back-fill with hindsight).',
+  rpPersonalNote: {
+    fa: 'این تنظیمات فقط شخصی هستند (مثلاً برای ثبت معامله واقعی خودتان). سیگنال‌ها، ارزیابی‌ها، نمودارها و آمار Reverse Plus برای همهٔ کاربران یکسان و عمومی است و با این تنظیمات تغییر نمی‌کند.',
+    en: 'These settings are personal only (e.g. for recording your own actual trades). Reverse Plus signals, evaluations and statistics are public and identical for every user; these settings never change them.',
   },
   rpBalance: { fa: 'موجودی حساب (USDT)', en: 'Account balance (USDT)' },
   rpRiskPct: { fa: 'درصد ریسک هر معامله', en: 'Risk per trade (%)' },
@@ -69,7 +68,7 @@ export const reversePlusTranslations: Dict = {
   rpNetRisk: { fa: 'ریسک خالص', en: 'Net risk' },
   rpEstimate: { fa: 'تخمینی: مشخصات قرارداد صرافی در دسترس نبود (stepSize / minQty گرد نشده).', en: 'Estimate: exchange contract filters unavailable (stepSize / minQty not applied).' },
   rpWhy: { fa: 'چرا این امتیاز؟', en: 'Why this score?' },
-  rpNoData: { fa: 'هنوز ارزیابی‌ای وجود ندارد. ماژول را فعال کنید؛ ارزیابی با اجرای زمان‌بندی‌شدهٔ ساعتی انجام می‌شود.', en: 'No evaluations yet. Enable the module; evaluation runs on its hourly schedule.' },
+  rpNoData: { fa: 'هنوز ارزیابی‌ای ثبت نشده است. ارزیابی مرکزی با اجرای زمان‌بندی‌شدهٔ ساعتی انجام می‌شود.', en: 'No evaluations yet. The central evaluation runs on its hourly schedule.' },
   rpPaper: { fa: 'Paper (شبیه‌سازی)', en: 'Paper (simulated)' },
   rpActual: { fa: 'واقعی (ثبت دستی)', en: 'Actual (manual)' },
   rpModeNote: { fa: 'آمار Paper و واقعی هرگز با هم ادغام نمی‌شوند.', en: 'Paper and Actual statistics are never merged.' },
