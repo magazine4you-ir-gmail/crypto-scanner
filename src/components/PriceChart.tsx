@@ -9,6 +9,10 @@ import {
   type ISeriesApi,
   type IPriceLine,
   type UTCTimestamp,
+  createSeriesMarkers,
+  type ISeriesMarkersPluginApi,
+  type SeriesMarker,
+  type Time,
   type LineStyle,
 } from 'lightweight-charts';
 import type { Candle } from '@/types/market';
@@ -29,7 +33,18 @@ interface ChartProps {
   targetLevels?: number[];
   supportLevels?: number[];
   resistanceLevels?: number[];
+  /** extra labelled horizontal lines (entry range, liquidation, current price ...). Reverse Plus uses these. */
+  extraLines?: ChartLine[];
+  /** event markers (signal / entry / exit). `time` in ms; snapped to the candle that contains it. */
+  markers?: ChartMarker[];
+  /** bump these numbers to fit all content / jump to the latest candle */
+  fitSignal?: number;
+  scrollSignal?: number;
+  heightClass?: string;
 }
+
+export interface ChartLine { price: number; color: string; title: string; style?: number; width?: number }
+export interface ChartMarker { time: number; position: 'aboveBar' | 'belowBar'; color: string; shape: 'arrowUp' | 'arrowDown' | 'circle' | 'square'; text: string }
 
 export function PriceChart({
   candles,
@@ -44,6 +59,11 @@ export function PriceChart({
   targetLevels,
   supportLevels,
   resistanceLevels,
+  extraLines,
+  markers,
+  fitSignal,
+  scrollSignal,
+  heightClass,
 }: ChartProps) {
   const chartContainerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
@@ -51,6 +71,8 @@ export function PriceChart({
   const volumeSeriesRef = useRef<ISeriesApi<'Histogram'> | null>(null);
   const priceLinesRef = useRef<IPriceLine[]>([]);
   const overlaySeriesRef = useRef<ISeriesApi<'Line'>[]>([]);
+  const markersRef = useRef<ISeriesMarkersPluginApi<Time> | null>(null);
+  const firstFitDone = useRef(false);
 
   useEffect(() => {
     if (!chartContainerRef.current || chartRef.current) return;
@@ -112,6 +134,8 @@ export function PriceChart({
       volumeSeriesRef.current = null;
       priceLinesRef.current = [];
       overlaySeriesRef.current = [];
+      markersRef.current = null;
+      firstFitDone.current = false;
     };
   }, [showVolume]);
 
@@ -226,6 +250,11 @@ export function PriceChart({
         });
       }
     });
+    extraLines?.forEach((l) => {
+      if (Number.isFinite(l.price)) {
+        pushLine({ price: l.price, color: l.color, lineWidth: (l.width ?? 1) as 1 | 2 | 3 | 4, lineStyle: l.style ?? 2, axisLabelVisible: true, title: l.title });
+      }
+    });
     supportLevels?.forEach((s) => {
       pushLine({
         price: s,
@@ -245,7 +274,15 @@ export function PriceChart({
       });
     });
 
-    chart.timeScale().fitContent();
+    // markers: snap each event to the candle that contains it
+    const mk: SeriesMarker<Time>[] = (markers ?? []).flatMap((m) => {
+      const c = candles.find((x) => m.time >= x.openTime && m.time <= x.closeTime);
+      return c ? [{ time: (c.openTime / 1000) as UTCTimestamp, position: m.position, color: m.color, shape: m.shape, text: m.text }] : [];
+    }).sort((a, b) => Number(a.time) - Number(b.time));
+    if (!markersRef.current) markersRef.current = createSeriesMarkers(candleSeries, mk);
+    else markersRef.current.setMarkers(mk);
+
+    if (!firstFitDone.current) { chart.timeScale().fitContent(); firstFitDone.current = true; }
   }, [
     candles,
     showEMA20,
@@ -259,7 +296,16 @@ export function PriceChart({
     targetLevels,
     supportLevels,
     resistanceLevels,
+    extraLines,
+    markers,
   ]);
 
-  return <div ref={chartContainerRef} className="w-full h-[400px] sm:h-[500px]" />;
+  useEffect(() => {
+    if (fitSignal !== undefined && chartRef.current) chartRef.current.timeScale().fitContent();
+  }, [fitSignal]);
+  useEffect(() => {
+    if (scrollSignal !== undefined && chartRef.current) chartRef.current.timeScale().scrollToRealTime();
+  }, [scrollSignal]);
+
+  return <div ref={chartContainerRef} className={`w-full ${heightClass ?? 'h-[400px] sm:h-[500px]'}`} />;
 }
