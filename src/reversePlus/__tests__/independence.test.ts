@@ -63,10 +63,10 @@ describe('independence from the existing signal system', () => {
     }
   });
 
-  it('settings live in their own table, not in user_settings', () => {
+  it('the client service is read-only and has no per-user server-side settings (scenario values stay in the browser)', () => {
     const svc = read('src/services/reversePlusService.ts');
-    expect(svc).toMatch(/reverse_plus_settings/);
-    expect(svc).not.toMatch(/user_settings|settingsService/);
+    expect(svc).not.toMatch(/user_settings|settingsService|reverse_plus_settings|reverse_plus_trades/);
+    expect(svc).not.toMatch(/\.(insert|update|upsert|delete)\(/);
   });
 
   it('OFF means off: the global switch is checked before any client / network / DB access', () => {
