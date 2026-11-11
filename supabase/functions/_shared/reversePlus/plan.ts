@@ -39,7 +39,7 @@ export interface PlusAnalysis {
   entry: EntryZoneResult;
   quality: QualityResult;
   plan: ScaledPlan | null;
-  /** final status after quality / liquidation / contract gates (the zone itself is never touched) */
+  /** entry-timing status (WAITING / APPROACHING / READY / EXPIRED). Informational findings live in `reasons`, never in the status. */
   status: EntryStatus;
   reasons: FinalReason[];
 }
@@ -74,16 +74,18 @@ export function buildPlusAnalysis(input: PlanInput): PlusAnalysis {
     target: Number(input.target) / 1e18,
   });
 
-  let status: EntryStatus = entry.status;
+  // The entry-timing status comes from the zone analysis ONLY. Plan / quality / liquidation / contract findings are
+  // appended as informational `reasons` for developers and neutral UI numbers; they never reject or hide a signal.
+  const status: EntryStatus = entry.status;
   const reasons: FinalReason[] = [...entry.reasons];
-  const live = status === 'WAITING' || status === 'APPROACHING' || status === 'READY';
 
   let plan: ScaledPlan | null = null;
-  if (entry.recommendedEntry !== null && entry.status !== 'INVALID') {
+  if (entry.recommendedEntry !== null) {
+    // The server-side reference plan is only built for candidates that meet the reference minimum RR (unchanged);
+    // the UI recalculates margin / notional / liquidation locally for any signal, so nothing is hidden when there is none.
     const validPrices = entry.candidates.filter((c) => c.valid).map((c) => c.price);
     if (!input.futuresAvailable) {
       reasons.push('NO_FUTURES_CONTRACT');
-      if (live) status = 'INVALID';
     } else if (validPrices.length) {
       plan = planScaledEntries({
         side: input.side,
@@ -94,21 +96,11 @@ export function buildPlusAnalysis(input: PlanInput): PlusAnalysis {
         settings,
         contract: input.contract,
       });
-      if (!plan.ok && live) {
-        status = 'INVALID';
-        reasons.push(plan.issues.includes('LIQ_BEFORE_STOP') ? 'LIQ_BEFORE_STOP' : 'PLAN_NOT_POSSIBLE');
-      }
+      if (!plan.ok) reasons.push(plan.issues.includes('LIQ_BEFORE_STOP') ? 'LIQ_BEFORE_STOP' : 'PLAN_NOT_POSSIBLE');
     }
   }
 
-  if (live && status !== 'INVALID') {
-    if (quality.grade === 'INSUFFICIENT_DATA') {
-      status = 'INVALID';
-      reasons.push('QUALITY_INSUFFICIENT');
-    } else if (quality.grade === 'NO_ENTRY') {
-      status = 'INVALID';
-      reasons.push('LOW_QUALITY');
-    }
-  }
+  if (quality.grade === 'INSUFFICIENT_DATA') reasons.push('QUALITY_INSUFFICIENT');
+  else if (quality.grade === 'NO_ENTRY') reasons.push('LOW_QUALITY');
   return { entry, quality, plan, status, reasons };
 }
