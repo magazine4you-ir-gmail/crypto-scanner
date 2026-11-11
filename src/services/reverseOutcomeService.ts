@@ -47,6 +47,60 @@ export async function fetchReverseOutcomes(limit = 400): Promise<ReverseOutcome[
   return (data ?? []).map(normalize);
 }
 
+export type ReverseStatusFilter = 'ALL' | 'OPEN' | 'WIN' | 'LOSS' | 'EXPIRED';
+
+export interface ReversePageQuery {
+  status: ReverseStatusFilter;
+  /** 0-based */
+  page: number;
+  pageSize?: number;
+  /** optional extra filters (Analysis center) */
+  symbol?: string;
+  timeframe?: string;
+  side?: 'BUY' | 'SELL';
+}
+
+/**
+ * One server-side page of reverse signals, newest first, straight from `reverse_signal_outcomes` (the same table and the
+ * same CANCELLED exclusion as Reverse Signal Lab). The open / closed / profit / loss / expired state is therefore the Lab's
+ * own state, never a parallel one.
+ */
+export async function fetchReverseOutcomePage(q: ReversePageQuery): Promise<{ rows: ReverseOutcome[]; total: number }> {
+  const size = q.pageSize ?? 100;
+  const from = q.page * size;
+  let query = supabase
+    .from('reverse_signal_outcomes')
+    .select(SELECT, { count: 'exact' })
+    .neq('status', 'CANCELLED');
+  if (q.status !== 'ALL') query = query.eq('status', q.status);
+  if (q.timeframe) query = query.eq('timeframe', q.timeframe);
+  if (q.side) query = query.eq('signal_type', q.side);
+  const sym = q.symbol?.trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
+  if (sym) query = query.ilike('symbol', `%${sym}%`);
+  const { data, error, count } = await query
+    .order('signal_at', { ascending: false })
+    .order('id', { ascending: false }) // stable order across pages
+    .range(from, from + size - 1);
+  if (error) throw new Error(error.message);
+  return { rows: (data ?? []).map(normalize), total: count ?? 0 };
+}
+
+export interface ReverseCounts { open: number; win: number; loss: number; expired: number; total: number }
+
+/** Trustworthy counts: exact head-counts on `reverse_signal_outcomes` (CANCELLED excluded, like the Lab). */
+export async function fetchReverseOutcomeCounts(): Promise<ReverseCounts> {
+  const one = async (status: Exclude<ReverseStatusFilter, 'ALL'>): Promise<number> => {
+    const { count, error } = await supabase
+      .from('reverse_signal_outcomes')
+      .select('id', { count: 'exact', head: true })
+      .eq('status', status);
+    if (error) throw new Error(error.message);
+    return count ?? 0;
+  };
+  const [open, win, loss, expired] = await Promise.all([one('OPEN'), one('WIN'), one('LOSS'), one('EXPIRED')]);
+  return { open, win, loss, expired, total: open + win + loss + expired };
+}
+
 export async function fetchReverseOutcomeById(id: string): Promise<ReverseOutcome | null> {
   const { data, error } = await supabase.from('reverse_signal_outcomes').select(SELECT).eq('id', id).maybeSingle();
   if (error) throw new Error(error.message);
