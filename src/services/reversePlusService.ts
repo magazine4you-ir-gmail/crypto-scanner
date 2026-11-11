@@ -1,50 +1,13 @@
 import { supabase } from './supabaseClient';
 
 /**
- * Reverse Signal Plus client service. Reads its OWN tables only (reverse_plus_*); the only rows the browser can
- * write are the user's settings and their own ACTUAL trade records (RLS). Evaluations and PAPER trades are written
- * by the `reverse-plus-eval` Edge Function. Numeric columns arrive as JSON numbers: they are used for DISPLAY only —
- * every calculation of the module runs in fixed-point decimals (see supabase/functions/_shared/reversePlus/money.ts).
+ * Reverse Signal Plus client service (read-only).
+ *
+ * The list of signals and their open / closed / profit / loss / expired state come from `reverse_signal_outcomes`
+ * (see reverseOutcomeService). This service only reads the CENTRAL evaluation rows (`reverse_plus_evaluations`) as
+ * enrichment (recommended entry, quality score, last known price) and the public reference config. It writes nothing:
+ * there are no per-user server-side settings. Leverage / sizing choices live in the browser (see reversePlus/scenarioPrefs).
  */
-
-export interface PlusSettingsRow {
-  user_id: string;
-  /** LEGACY: no longer controls visibility or processing. Kept only so old rows keep their value. */
-  enabled?: boolean;
-  enabled_at?: string | null;
-  account_balance: number;
-  risk_pct: number;
-  max_risk_per_trade: number;
-  leverage: number;
-  margin_mode: 'ISOLATED' | 'CROSS';
-  fee_pct: number;
-  slippage_pct: number;
-  max_entries: number;
-  max_margin_pct: number;
-  min_rr: number;
-  assumed_mmr_pct: number;
-  liq_safety_factor: number;
-  approach_pct: number;
-}
-
-/** Personal parameters only (balance, risk, leverage, fees ...). They never affect the public signals / evaluations. */
-export type PlusPersonalSettings = Omit<PlusSettingsRow, 'user_id' | 'enabled' | 'enabled_at'>;
-
-export const DEFAULT_PLUS_SETTINGS: PlusPersonalSettings = {
-  account_balance: 100,
-  risk_pct: 1,
-  max_risk_per_trade: 1,
-  leverage: 50,
-  margin_mode: 'ISOLATED',
-  fee_pct: 0.05,
-  slippage_pct: 0.02,
-  max_entries: 3,
-  max_margin_pct: 50,
-  min_rr: 0.7,
-  assumed_mmr_pct: 0.5,
-  liq_safety_factor: 0.8,
-  approach_pct: 0.5,
-};
 
 export interface QualityFactorRow {
   key: string;
@@ -92,6 +55,7 @@ export interface PlusEvaluation {
   rr_net: number | null;
   rr_basis: string;
   min_rr_used: number | null;
+  /** 'INVALID' only exists on LEGACY stored rows; it is retired and must never be shown (see reversePlus/summary.ts). */
   entry_status: 'WAITING' | 'APPROACHING' | 'READY' | 'INVALID' | 'EXPIRED';
   status_reasons: string[];
   quality_score: number | null;
@@ -110,46 +74,6 @@ export interface PlusEvaluation {
   contract_known: boolean | null;
   source?: 'CENTRAL' | 'LEGACY_USER_COPY';
   signal_at: string | null;
-}
-
-export type PlusOutcome = 'PENDING' | 'OPEN' | 'WIN' | 'LOSS' | 'EXPIRED' | 'BREAKEVEN' | 'NO_FILL' | 'CANCELLED';
-
-export interface PlusTrade {
-  id: string;
-  /** null = central (public) PAPER trade; set = the owner's own ACTUAL (or legacy) row */
-  user_id: string | null;
-  owner_key?: string | null;
-  mode: 'PAPER' | 'ACTUAL';
-  reverse_outcome_id: string;
-  origin_outcome_id: string | null;
-  symbol: string;
-  timeframe: string;
-  side: 'BUY' | 'SELL';
-  quality_score: number | null;
-  recommended_entry: number | null;
-  stop_loss: number;
-  take_profit: number;
-  leverage: number | null;
-  margin_used: number | null;
-  entries_planned: number | null;
-  entries_filled: number | null;
-  qty_total: number | null;
-  avg_entry: number | null;
-  exit_price: number | null;
-  exit_at: string | null;
-  gross_pnl: number | null;
-  fees: number | null;
-  net_pnl: number | null;
-  final_r: number | null;
-  outcome: PlusOutcome;
-  signal_at: string | null;
-  notes: string | null;
-}
-
-export async function fetchPlusSettings(): Promise<PlusSettingsRow | null> {
-  const { data, error } = await supabase.from('reverse_plus_settings').select('*').maybeSingle();
-  if (error) throw new Error(error.message);
-  return (data as PlusSettingsRow | null) ?? null;
 }
 
 /** Public reference configuration used by the central evaluator (read-only for users). */
@@ -171,62 +95,6 @@ export async function fetchPublicConfig(): Promise<PlusPublicConfig | null> {
   const { data, error } = await supabase.from('reverse_plus_public_config').select('*').maybeSingle();
   if (error) throw new Error(error.message);
   return (data as PlusPublicConfig | null) ?? null;
-}
-
-export async function savePlusSettings(userId: string, patch: Partial<PlusPersonalSettings>): Promise<PlusSettingsRow> {
-  // `enabled` / `enabled_at` are deliberately never written from the browser any more.
-  const { data, error } = await supabase
-    .from('reverse_plus_settings')
-    .upsert({ ...DEFAULT_PLUS_SETTINGS, ...patch, user_id: userId }, { onConflict: 'user_id' })
-    .select('*')
-    .single();
-  if (error) throw new Error(error.message);
-  return data as PlusSettingsRow;
-}
-
-/**
- * Supabase / PostgREST caps every response at `max_rows` (default 1000), so `.limit(3000)` alone silently returns
- * at most 1000 rows. This helper reads the rows in pages of 1000 (`.range`) until `limit` rows are collected or the
- * table is exhausted.
- */
-const PAGE_SIZE = 1000;
-
-async function fetchAllPages<T>(
-  limit: number,
-  page: (from: number, to: number) => PromiseLike<{ data: unknown[] | null; error: { message: string } | null }>,
-): Promise<T[]> {
-  const out: T[] = [];
-  for (let from = 0; from < limit; from += PAGE_SIZE) {
-    const to = Math.min(from + PAGE_SIZE, limit) - 1;
-    const { data, error } = await page(from, to);
-    if (error) throw new Error(error.message);
-    const rows = (data ?? []) as T[];
-    out.push(...rows);
-    if (rows.length < to - from + 1) break; // last page reached
-  }
-  return out;
-}
-
-export async function fetchEvaluations(
-  kind: 'LIVE' | 'SIGNAL_TIME' = 'LIVE',
-  limit = 150,
-  opts: { before?: string | null } = {},
-): Promise<PlusEvaluation[]> {
-  return fetchAllPages<PlusEvaluation>(limit, (from, to) => {
-    let q = supabase
-      .from('reverse_plus_evaluations')
-      .select('*')
-      .is('user_id', null) // central (public) rows: identical for every user
-      .eq('owner_key', REVERSE_PLUS_CENTRAL_OWNER)
-      .eq('source', 'CENTRAL')
-      .eq('eval_kind', kind);
-    // optional server-side boundary (e.g. public_since -> only historical signals)
-    if (opts.before) q = q.lt('signal_at', opts.before);
-    return q
-      .order('signal_at', { ascending: false })
-      .order('id', { ascending: false }) // stable order across pages
-      .range(from, to);
-  });
 }
 
 /** Central historical backtest row (raw facts; leverage / PnL are derived in the browser by the pure engine). */
@@ -258,17 +126,6 @@ export interface PlusBacktest {
   engine_version: string;
 }
 
-export async function fetchBacktests(limit = 3000): Promise<PlusBacktest[]> {
-  return fetchAllPages<PlusBacktest>(limit, (from, to) =>
-    supabase
-      .from('reverse_plus_backtests')
-      .select('*')
-      .order('signal_at', { ascending: false })
-      .order('id', { ascending: false }) // stable order across pages
-      .range(from, to),
-  );
-}
-
 export async function fetchBacktestFor(reverseOutcomeId: string): Promise<PlusBacktest | null> {
   const { data, error } = await supabase.from('reverse_plus_backtests').select('*').eq('reverse_outcome_id', reverseOutcomeId).maybeSingle();
   if (error) throw new Error(error.message);
@@ -283,55 +140,27 @@ export async function fetchEvaluationsFor(reverseOutcomeId: string): Promise<{ s
   return { signalTime: rows.find((r) => r.eval_kind === 'SIGNAL_TIME') ?? null, live: rows.find((r) => r.eval_kind === 'LIVE') ?? null };
 }
 
-export async function fetchPlusTrades(limit = 500): Promise<PlusTrade[]> {
+/** Evaluations of a page of signals in ONE request (central rows only). Missing entries simply mean "not evaluated yet". */
+export interface EvaluationPair { signalTime: PlusEvaluation | null; live: PlusEvaluation | null }
+
+export async function fetchEvaluationsForIds(ids: string[]): Promise<Map<string, EvaluationPair>> {
+  const out = new Map<string, EvaluationPair>();
+  if (ids.length === 0) return out;
   const { data, error } = await supabase
-    .from('reverse_plus_trades')
+    .from('reverse_plus_evaluations')
     .select('*')
-    // central PAPER rows (user_id null) + the signed-in user's own ACTUAL rows (RLS already hides other users' rows)
-    .or(`and(user_id.is.null,mode.eq.PAPER,owner_key.eq.${REVERSE_PLUS_CENTRAL_OWNER}),mode.eq.ACTUAL`)
-    .order('signal_at', { ascending: false })
-    .limit(limit);
+    .is('user_id', null)
+    .eq('owner_key', REVERSE_PLUS_CENTRAL_OWNER)
+    .eq('source', 'CENTRAL')
+    .in('reverse_outcome_id', ids);
   if (error) throw new Error(error.message);
-  return (data ?? []) as PlusTrade[];
+  for (const r of (data ?? []) as PlusEvaluation[]) {
+    const cur = out.get(r.reverse_outcome_id) ?? { signalTime: null, live: null };
+    if (r.eval_kind === 'SIGNAL_TIME') cur.signalTime = r;
+    else cur.live = r;
+    out.set(r.reverse_outcome_id, cur);
+  }
+  return out;
 }
 
-export interface ActualTradeInput {
-  user_id: string;
-  reverse_outcome_id: string;
-  origin_outcome_id: string | null;
-  symbol: string;
-  timeframe: string;
-  side: 'BUY' | 'SELL';
-  quality_score: number | null;
-  recommended_entry: number | null;
-  stop_loss: string;
-  take_profit: string;
-  leverage: string | null;
-  margin_used: string | null;
-  entries_filled: number;
-  qty_total: string;
-  avg_entry: string;
-  fills: { price: string; qty: string }[];
-  exit_price: string;
-  exit_at: string;
-  gross_pnl: string;
-  fees: string;
-  net_pnl: string;
-  risk_at_stop: string | null;
-  final_r: string | null;
-  outcome: PlusOutcome;
-  signal_at: string | null;
-}
-
-/** Numbers are sent as exact decimal strings (PostgREST casts them into `numeric`). */
-export async function saveActualTrade(row: ActualTradeInput): Promise<void> {
-  const { error } = await supabase
-    .from('reverse_plus_trades')
-    .upsert({ ...row, mode: 'ACTUAL', updated_at: new Date().toISOString() }, { onConflict: 'user_id,mode,reverse_outcome_id' });
-  if (error) throw new Error(error.message);
-}
-
-export async function deleteActualTrade(id: string): Promise<void> {
-  const { error } = await supabase.from('reverse_plus_trades').delete().eq('id', id).eq('mode', 'ACTUAL');
-  if (error) throw new Error(error.message);
-}
+export { FALLBACK_PUBLIC_CONFIG } from '@/reversePlus/fallbackConfig';
