@@ -79,16 +79,18 @@ describe('orchestrator (buildPlusAnalysis)', () => {
     expect(a.entry.zoneHigh).toBe(input.zoneHigh);
   });
 
-  it('no USDT perpetual -> INVALID with an explicit reason (not a fake plan)', () => {
+  it('no USDT perpetual -> explicit informational reason, no fake plan, status untouched', () => {
     const a = buildPlusAnalysis(mk({ futuresAvailable: false }));
     expect(a.plan).toBeNull();
-    if (a.entry.status !== 'EXPIRED') expect(a.status).toBe('INVALID');
+    expect(a.status).toBe(a.entry.status);
     expect(a.reasons).toContain('NO_FUTURES_CONTRACT');
   });
 
-  it('50x on a ~3% stop -> INVALID (liquidation before stop) even if everything else is fine', () => {
+  it('50x on a ~3% stop -> LIQ_BEFORE_STOP is reported as information; the status is never promoted to INVALID', () => {
     const a = buildPlusAnalysis(mk({ settings: { ...settings, minRr: D('0.4') } }));
     expect(a.plan?.issues).toContain('LIQ_BEFORE_STOP');
-    expect(a.status).toBe('INVALID');
+    expect(a.reasons).toContain('LIQ_BEFORE_STOP');
+    expect(a.status).toBe(a.entry.status);
+    expect(['WAITING', 'APPROACHING', 'READY', 'EXPIRED']).toContain(a.status);
   });
 });
