@@ -401,7 +401,7 @@ Deno.serve(async (req: Request) => {
             }
 
             const a = analysis.a;
-            if (!historical && a.plan?.ok && a.status !== "INVALID" && a.status !== "EXPIRED" && !tradeByKey.has(key)) {
+            if (!historical && a.plan?.ok && a.status !== "EXPIRED" && !tradeByKey.has(key)) {
               const steps = a.plan.steps;
               const tradeRow: Row = {
                 user_id: null, owner_key: CENTRAL_OWNER_KEY, mode: "PAPER", reverse_outcome_id: rev.id, origin_outcome_id: rev.origin_outcome_id,
