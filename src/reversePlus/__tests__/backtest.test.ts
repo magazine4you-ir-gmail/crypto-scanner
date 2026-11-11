@@ -218,9 +218,9 @@ describe('replay and instructions', () => {
     const s3 = replayAt(cs, bt, T0, 3); expect(s3.status).toBe('TP_HIT'); expect(s3.finished).toBe(true);
     expect(replayEndCursor(cs, bt)).toBe(3);
   });
-  it('instructions: ENTRY_ALLOWED only when the evaluation is READY; INVALID never turns green', () => {
+  it('instructions: ENTRY_ALLOWED only when the evaluation is READY; a legacy stored INVALID is shown as waiting, never as a state', () => {
     expect(instructionFor({ mode: 'LIVE', evalStatus: 'READY' }).state).toBe('ENTRY_ALLOWED');
-    expect(instructionFor({ mode: 'LIVE', evalStatus: 'INVALID' }).state).toBe('INVALID');
+    expect(instructionFor({ mode: 'LIVE', evalStatus: 'INVALID' }).state).toBe('WAITING_FOR_ENTRY');
     expect(instructionFor({ mode: 'LIVE', evalStatus: 'WAITING' }).state).toBe('WAITING_FOR_ENTRY');
     expect(instructionFor({ mode: 'LIVE', evalStatus: 'READY', positionOpen: true, pctToTarget: 0.2, pctToStop: 3 }).state).toBe('APPROACHING_TP');
     expect(instructionFor({ mode: 'HISTORICAL', evalStatus: 'INVALID', backtest: 'WIN' }).state).toBe('TP_HIT');
