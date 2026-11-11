@@ -30,8 +30,8 @@ describe('entry zone analysis', () => {
     expect(Number(e.rrNet) / 1e18).toBeCloseTo(0.5913, 3);
   });
 
-  it('grades RR: <min INVALID, min..1 REVIEW (warning), >=1 FAVORABLE', () => {
-    expect(gradeRr(D('0.69'), D('0.7'))).toBe('INVALID');
+  it('grades RR (informational only): <min BELOW_MIN, min..1 REVIEW, >=1 FAVORABLE', () => {
+    expect(gradeRr(D('0.69'), D('0.7'))).toBe('BELOW_MIN');
     expect(gradeRr(D('0.7'), D('0.7'))).toBe('REVIEW');
     expect(gradeRr(D('0.99'), D('0.7'))).toBe('REVIEW');
     expect(gradeRr(D('1'), D('0.7'))).toBe('FAVORABLE');
@@ -48,11 +48,12 @@ describe('entry zone analysis', () => {
     expect(toString(r.zoneHigh!)).toBe('100.3');
   });
 
-  it('rejects an entry whose net RR is below the minimum (default 0.7 -> INVALID)', () => {
+  it('a net RR below the reference minimum is only an informational reason: the signal keeps its timing status', () => {
     const r = analyzeEntryZone({ ...base, minRr: D('0.7') });
-    expect(r.status).toBe('INVALID');
+    expect(['WAITING', 'APPROACHING', 'READY']).toContain(r.status);
     expect(r.reasons).toContain('RR_BELOW_MIN');
     expect(r.entryRangeLow).toBeNull();
+    expect(r.recommendedEntry).not.toBeNull();
   });
 
   it('WAITING -> APPROACHING -> READY as the price walks towards the recommended entry', () => {
@@ -67,9 +68,9 @@ describe('entry zone analysis', () => {
     expect(r.reasons).toContain('PRICE_PASSED_ZONE');
   });
 
-  it('EXPIRED when the signal is too old; INVALID when the stop was touched; EXPIRED when the target was consumed', () => {
+  it('EXPIRED when the signal is too old, the stop was touched or the target was consumed (never INVALID)', () => {
     expect(analyzeEntryZone({ ...base, ageBars: 48 }).reasons).toContain('SIGNAL_EXPIRED');
-    expect(analyzeEntryZone({ ...base, stopTouched: true }).status).toBe('INVALID');
+    expect(analyzeEntryZone({ ...base, stopTouched: true }).status).toBe('EXPIRED');
     expect(analyzeEntryZone({ ...base, targetTouched: true }).status).toBe('EXPIRED');
   });
 
@@ -89,9 +90,10 @@ describe('entry zone analysis', () => {
     expect(toString(r.candidates[0].price)).toBe('100');
   });
 
-  it('INVALID when the geometry is impossible (entry outside stop/target)', () => {
+  it('impossible geometry (entry outside stop/target) gives no entry suggestion, only an informational reason', () => {
     const r = analyzeEntryZone({ ...base, stop: D(99), target: D(98) });
-    expect(r.status).toBe('INVALID');
+    expect(r.status).toBe('WAITING');
+    expect(r.recommendedEntry).toBeNull();
     expect(r.reasons).toContain('GEOMETRY_INVALID');
   });
 
