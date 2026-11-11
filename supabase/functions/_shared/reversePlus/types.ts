@@ -4,8 +4,11 @@ import type { Dec } from './money.ts';
 /** Direction of the REVERSE trade (what Reverse Signal Plus would actually open). */
 export type Side = 'BUY' | 'SELL';
 
-export type EntryStatus = 'WAITING' | 'APPROACHING' | 'READY' | 'INVALID' | 'EXPIRED';
-export type RrGrade = 'INVALID' | 'REVIEW' | 'FAVORABLE';
+/** Entry-timing status of the evaluation. There is deliberately NO "invalid" state: risk problems (low RR, high leverage,
+ *  liquidation caution ...) are reported as informational `reasons` / numbers and never hide or reject a signal. */
+export type EntryStatus = 'WAITING' | 'APPROACHING' | 'READY' | 'EXPIRED';
+/** Informational RR grade (never a gate). BELOW_MIN = net RR is under the configured reference minimum. */
+export type RrGrade = 'BELOW_MIN' | 'REVIEW' | 'FAVORABLE';
 export type MarginMode = 'ISOLATED' | 'CROSS';
 
 /** Per-side costs, in percent (0.05 = 0.05 %). */
