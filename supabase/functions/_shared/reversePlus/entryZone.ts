@@ -55,7 +55,7 @@ export function unitEconomics(entry: Dec, stop: Dec, target: Dec, cost: CostConf
 }
 
 export function gradeRr(rrNet: Dec, minRr: Dec): RrGrade {
-  if (cmp(rrNet, minRr) < 0) return 'INVALID';
+  if (cmp(rrNet, minRr) < 0) return 'BELOW_MIN';
   return cmp(rrNet, ONE) < 0 ? 'REVIEW' : 'FAVORABLE';
 }
 
@@ -162,10 +162,11 @@ export function analyzeEntryZone(input: EntryZoneInput): EntryZoneResult {
     .map((p) => {
       const e = unitEconomics(p, stop, target, cost);
       const grade = gradeRr(e.rrNet, minRr);
-      return { price: p, ...e, valid: grade !== 'INVALID', grade };
+      return { price: p, ...e, valid: grade !== 'BELOW_MIN', grade };
     });
 
-  if (candidates.length === 0) return emptyResult('INVALID', ['GEOMETRY_INVALID']);
+  // Nothing usable inside the zone: the signal is still listed (informational reason only, no entry suggestion).
+  if (candidates.length === 0) return emptyResult('WAITING', ['GEOMETRY_INVALID']);
 
   // --- terminal states that do not depend on the candidate quality ---------------------------
   const expired = input.ageBars >= input.expiryBars;
@@ -205,10 +206,11 @@ export function analyzeEntryZone(input: EntryZoneInput): EntryZoneResult {
     reasons: [...reasons, ...why],
   });
 
-  if (input.stopTouched) return done('INVALID', ['STOP_TOUCHED']);
+  if (input.stopTouched) return done('EXPIRED', ['STOP_TOUCHED']);
   if (input.targetTouched) return done('EXPIRED', ['TARGET_TOUCHED']);
   if (expired) return done('EXPIRED', ['SIGNAL_EXPIRED']);
-  if (!valid.length) return done('INVALID', ['NO_VALID_ENTRY', 'RR_BELOW_MIN']);
+  // A low RR never rejects the signal: it is reported as an informational reason and the timing status goes on as usual.
+  const rrNotes: EntryReason[] = valid.length ? [] : ['RR_BELOW_MIN'];
 
   // --- price position vs the zone (fills happen when the market moves TOWARDS the limit) -------
   const tolAbs = pctOf(currentPrice, tol);
@@ -217,11 +219,11 @@ export function analyzeEntryZone(input: EntryZoneInput): EntryZoneResult {
   if (passed) return done('EXPIRED', ['PRICE_PASSED_ZONE']);
 
   const stopHit = side === 'SELL' ? currentPrice >= stop : currentPrice <= stop;
-  if (stopHit) return done('INVALID', ['STOP_TOUCHED']);
+  if (stopHit) return done('EXPIRED', ['STOP_TOUCHED']);
   const targetHit = side === 'SELL' ? currentPrice <= target : currentPrice >= target;
   if (targetHit) return done('EXPIRED', ['TARGET_TOUCHED']);
 
-  const why: EntryReason[] = best.grade === 'REVIEW' ? ['RR_WARNING'] : [];
+  const why: EntryReason[] = [...rrNotes, ...(best.grade === 'REVIEW' ? (['RR_WARNING'] as EntryReason[]) : [])];
   const reached = side === 'SELL' ? currentPrice >= rec : currentPrice <= rec;
   if (reached) return done('READY', why);
   if (cmp(ratioPct(distance, currentPrice), input.approachPct) <= 0) return done('APPROACHING', why);
