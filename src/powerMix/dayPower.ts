@@ -13,6 +13,10 @@
 //                                  (>= threshold = Power, else Neutral) and flagged "dead hours"
 //   * otherwise                -> needs both key windows to be closed; until then it is PENDING (with an approximate tendency)
 //                                  and once the US window closes the class is locked
+//
+// تغییر اعمال‌شده: مبنای محاسبه «حرکت از ابتدای روز» (dayMovePct) از ساعت ۰۳:۳۰ تهران
+// (زمان بسته شدن کندل روزانه BTC = 00:00 UTC) گرفته می‌شود. بقیه منطق‌ها بدون تغییر مانده‌اند.
+
 import { DAY_MS, MINUTE_MS, roundToSecond, tehranDayKey, tehranDayStart } from './tehranTime';
 import type { DayClass, PowerMixConfig, SidePick } from './config';
 
@@ -31,6 +35,9 @@ const EPS = 1e-9;
 const BASELINE_DAYS = 14;
 const MIN_BASELINE_DAYS = 5;
 
+/** 03:30 تهران = زمان بسته شدن کندل روزانه BTC (00:00 UTC) */
+const CRYPTO_DAY_OPEN_OFFSET_MS = 210 * MINUTE_MS;
+
 export type DayState = 'FINAL' | 'PENDING' | 'NO_DATA';
 export type Tendency = 'UP' | 'DOWN' | 'FLAT';
 
@@ -45,7 +52,7 @@ export interface SignalDayInfo {
   /** net BTC move of the London / US window in %, null when the window has no data yet */
   londonPct: number | null;
   usPct: number | null;
-  /** dead-hours signals: 00:00 -> signal time.  pending: 00:00 -> now.  otherwise null */
+  /** dead-hours signals: 00:00 -> signal time.  pending: crypto-day-open -> now.  otherwise null */
   dayMovePct: number | null;
   /** PENDING only: where the day is heading right now */
   tendency: Tendency | null;
@@ -127,8 +134,13 @@ export function createDayAnalyzer(candles: BtcCandle[], cfg: PowerMixConfig, now
     return null;
   };
 
+  /**
+   * درصد حرکت از مبنای کندل روزانه BTC (۰۳:۳۰ تهران = 00:00 UTC).
+   * اگر کندل ۰۳:۳۰ موجود نبود، به open نیمه‌شب تهران fallback می‌کند.
+   */
   const dayMovePct = (dayStart: number, ms: number): number | null => {
-    const open = idx.get(dayStart)?.open;
+    const cryptoOpenTime = dayStart + CRYPTO_DAY_OPEN_OFFSET_MS;
+    const open = idx.get(cryptoOpenTime)?.open ?? idx.get(dayStart)?.open;
     const p = priceAt(dayStart, ms);
     return open && open > 0 && p !== null ? ((p - open) / open) * 100 : null;
   };
