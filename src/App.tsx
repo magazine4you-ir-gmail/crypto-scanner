@@ -23,6 +23,7 @@ import { ScalpPage } from '@/pages/ScalpPage';
 import { ReverseLabPage } from '@/pages/ReverseLabPage';
 import { ReversePlusPage } from '@/pages/ReversePlusPage';
 import { ReversePlusSignalPage } from '@/pages/ReversePlusSignalPage';
+import { PowerMixPage } from '@/pages/PowerMixPage';
 import { isReversePlusEnabled } from '@/reversePlus/featureFlag';
 
 function AppRoute({ children }: { children: ReactNode }) {
@@ -76,6 +77,7 @@ function AppRoutes() {
       <Route path="/reverse-lab" element={<AppRoute><ReverseLabPage /></AppRoute>} />
       {isReversePlusEnabled() && <Route path="/reverse-plus" element={<AppRoute><ReversePlusPage /></AppRoute>} />}
       {isReversePlusEnabled() && <Route path="/reverse-plus/signal/:id" element={<AppRoute><ReversePlusSignalPage /></AppRoute>} />}
+      <Route path="/power-mix" element={<AppRoute><PowerMixPage /></AppRoute>} />
       <Route path="/scalp" element={<AppRoute><ScalpPage /></AppRoute>} />
 
       <Route path="*" element={<Navigate to="/" replace />} />
