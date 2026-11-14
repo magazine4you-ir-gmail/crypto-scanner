@@ -1,4 +1,5 @@
 import { reversePlusTranslations } from './reversePlusTranslations';
+import { powerMixTranslations } from './powerMixTranslations';
 
 export type Lang = 'fa' | 'en';
 
@@ -404,6 +405,11 @@ export const translations: Translations = {
 
 // Reverse Signal Plus (additive keys, prefix "rp"; no existing key is overwritten)
 for (const [k, v] of Object.entries(reversePlusTranslations)) {
+  if (!(k in translations)) translations[k] = v;
+}
+
+// Power Mix Lab (additive keys, prefix "pm" + "powerMix"; no existing key is overwritten)
+for (const [k, v] of Object.entries(powerMixTranslations)) {
   if (!(k in translations)) translations[k] = v;
 }
 
