@@ -20,6 +20,7 @@ import {
   TestTubes,
   ArrowLeftRight,
   Zap,
+  Layers,
 } from 'lucide-react';
 import { useState } from 'react';
 import { FuturesCalculatorButton } from '@/components/FuturesCalculator';
@@ -31,6 +32,7 @@ const baseNavItems = [
   { key: 'autoScan', path: '/auto-scan', icon: Timer },
   { key: 'signalLab', path: '/signal-lab', icon: TestTubes },
   { key: 'reverseLab', path: '/reverse-lab', icon: ArrowLeftRight },
+  { key: 'powerMix', path: '/power-mix', icon: Layers },
   { key: 'scalp', path: '/scalp', icon: Zap },
   { key: 'watchlist', path: '/watchlist', icon: Star },
   { key: 'portfolio', path: '/portfolio', icon: Briefcase },
