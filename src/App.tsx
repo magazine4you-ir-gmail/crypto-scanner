@@ -26,6 +26,8 @@ import { ReversePlusPage } from '@/pages/ReversePlusPage';
 import { ReversePlusSignalPage } from '@/pages/ReversePlusSignalPage';
 import { PowerMixPage } from '@/pages/PowerMixPage';
 import { isReversePlusEnabled } from '@/reversePlus/featureFlag';
+import { OriginalPlusPage } from '@/pages/OriginalPlusPage';
+import { OriginalPlusSignalPage } from '@/pages/OriginalPlusSignalPage';
 
 function AppRoute({ children }: { children: ReactNode }) {
   const { loading } = useAuth();
