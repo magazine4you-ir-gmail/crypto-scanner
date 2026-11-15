@@ -108,5 +108,15 @@ export const powerMixTranslations: Dict = {
   pmResetDefaults: { fa: 'بازگشت به پیش‌فرض عمومی', en: 'Back to global defaults' },
   pmPersonalActive: { fa: 'تنظیمات شخصی فعال است', en: 'Personal settings active' },
   pmGlobalActive: { fa: 'پیش‌فرض عمومی', en: 'Global defaults' },
+    pmMixModeLocked: { fa: 'آمار پایان‌روز (قفل بعد از آمریکا)', en: 'End-of-day stats (locks after US)' },
+  pmMixModeExecutable: { fa: 'آمار لحظهٔ سیگنال (قابل‌اجرا)', en: 'At-signal stats (executable)' },
+  pmMixModeHintLocked: {
+    fa: 'کلاس روز بعد از بسته شدن بازهٔ آمریکا قفل می‌شود؛ برای سیگنال‌های زودتر، از حرکت کامل روز استفاده شده است.',
+    en: "Day class locks after the US window; earlier signals use the full day's move.",
+  },
+  pmMixModeHintExecutable: {
+    fa: 'فقط با داده‌ای که تا لحظهٔ صدور سیگنال معلوم بوده تصمیم گرفته می‌شود — مناسب برای ارزیابی لبهٔ واقعی ترید.',
+    en: 'Uses only information known at signal time — suitable for measuring a tradable edge.',
+  },
   pmInvalid: { fa: 'بازه‌ها معتبر نیستند (لندن باید قبل از آمریکا تمام شود و ساعت‌ها ترتیب درست داشته باشند).', en: 'The windows are not valid (London must end before US starts and times must be in order).' },
 };
