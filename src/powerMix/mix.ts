@@ -108,15 +108,3 @@ export function displaySide(row: MixRow, view: MixView, cfg: PowerMixConfig, inv
   if (p !== 'none') return p;
   return day.state === 'FINAL' ? null : 'original'; // class selects nothing -> hidden; pending / no data -> listed, clearly labelled
 }
-۳) ترجمه‌ها — فقط این کلیدها را به src/i18n/powerMixTranslations.ts اضافه کن
-ts
-  pmMixModeLocked: { fa: 'آمار پایان‌روز (قفل بعد از آمریکا)', en: 'End-of-day stats (locks after US)' },
-  pmMixModeExecutable: { fa: 'آمار لحظهٔ سیگنال (قابل‌اجرا)', en: 'At-signal stats (executable)' },
-  pmMixModeHintLocked: {
-    fa: 'کلاس روز بعد از بسته شدن بازهٔ آمریکا قفل می‌شود؛ برای سیگنال‌های زودتر، از حرکت کامل روز استفاده شده است.',
-    en: "Day class locks after the US window; earlier signals use the full day's move.",
-  },
-  pmMixModeHintExecutable: {
-    fa: 'فقط با داده‌ای که تا لحظهٔ صدور سیگنال معلوم بوده تصمیم گرفته می‌شود — مناسب برای ارزیابی لبهٔ واقعی ترید.',
-    en: 'Uses only information known at signal time — suitable for measuring a tradable edge.',
-  },
