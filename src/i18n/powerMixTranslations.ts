@@ -118,5 +118,22 @@ export const powerMixTranslations: Dict = {
     fa: 'فقط با داده‌ای که تا لحظهٔ صدور سیگنال معلوم بوده تصمیم گرفته می‌شود — مناسب برای ارزیابی لبهٔ واقعی ترید.',
     en: 'Uses only information known at signal time — suitable for measuring a tradable edge.',
   },
+    pmTimeRange: { fa: 'بازهٔ زمانی', en: 'Time range' },
+  pmRange1d: { fa: '۱ روز', en: '1 day' },
+  pmRange7d: { fa: '۱ هفته', en: '1 week' },
+  pmRange30d: { fa: '۱ ماه', en: '1 month' },
+  pmRange90d: { fa: '۳ ماه', en: '3 months' },
+  pmRangeAll: { fa: 'همه', en: 'All time' },
+
+  pmMixModeLocked: { fa: 'آمار پایان‌روز (قفل بعد از آمریکا)', en: 'End-of-day stats (locks after US)' },
+  pmMixModeExecutable: { fa: 'آمار لحظهٔ سیگنال (قابل‌اجرا)', en: 'At-signal stats (executable)' },
+  pmMixModeHintLocked: {
+    fa: 'کلاس روز بعد از بسته شدن بازهٔ آمریکا قفل می‌شود؛ برای سیگنال‌های زودتر، از حرکت کامل روز استفاده شده است.',
+    en: "Day class locks after the US window; earlier signals use the full day's move.",
+  },
+  pmMixModeHintExecutable: {
+    fa: 'فقط با داده‌ای که تا لحظهٔ صدور سیگنال معلوم بوده تصمیم گرفته می‌شود — مناسب برای ارزیابی لبهٔ واقعی ترید.',
+    en: 'Uses only information known at signal time — suitable for measuring a tradable edge.',
+  },
   pmInvalid: { fa: 'بازه‌ها معتبر نیستند (لندن باید قبل از آمریکا تمام شود و ساعت‌ها ترتیب درست داشته باشند).', en: 'The windows are not valid (London must end before US starts and times must be in order).' },
 };
