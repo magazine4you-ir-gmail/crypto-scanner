@@ -12,5 +12,10 @@ export const originalPlusTranslations: Dict = {
     en: 'Same model as Reverse Signal Plus, applied to the original signal (signal_outcomes) — not the reverse trade.',
   },
   opNoMatch: { fa: 'سیگنالی با این فیلتر پیدا نشد.', en: 'No signals match this filter.' },
+  opNoOpen: { fa: 'در حال حاضر سیگنال اصلی بازی وجود ندارد.', en: 'There are no open original signals right now.' },
+  opCountsHint: {
+    fa: 'شمارش‌ها مستقیم از نتایج سیگنال اصلی (همان منبع آزمایشگاه سیگنال) محاسبه می‌شوند.',
+    en: 'Counts come straight from the original signal outcomes (the same source as Signal Lab).',
+  },
   opBack: { fa: 'بازگشت به اصلی پلاس', en: 'Back to Original Plus' },
 };
