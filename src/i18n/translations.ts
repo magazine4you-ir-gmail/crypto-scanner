@@ -21,7 +21,7 @@ export const translations: Translations = {
   performance: { fa: 'عملکرد', en: 'Performance' },
   settings: { fa: 'تنظیمات', en: 'Settings' },
   profile: { fa: 'پروفایل', en: 'Profile' },
-  originalPlus: { fa: 'اصلی پلاس', en: 'Original Plus' },
+  originalPlus: { fa: 'سیگنال اصلی پلاس', en: 'Original Plus' },
 
   // Auth
   login: { fa: 'ورود', en: 'Login' },
