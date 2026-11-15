@@ -44,3 +44,12 @@ export function cryptoDayStart(ms: number): number {
 export function cryptoDayKey(ms: number): string {
   return new Date(cryptoDayStart(ms)).toISOString().slice(0, 10);
 }
+
+/**
+ * 00:00 Tehran of the calendar date on which the crypto day of `ms` OPENS (the crypto day opens at 03:30 Tehran).
+ * London / US windows and dead hours are Tehran wall-clock minutes counted from this point, so a signal at 00:30 Tehran
+ * (still inside the previous crypto day) is measured against the PREVIOUS day's sessions: minutes = 1470 (24:30).
+ */
+export function cryptoCalendarStart(ms: number): number {
+  return cryptoDayStart(ms) - OFFSET_MS;
+}
