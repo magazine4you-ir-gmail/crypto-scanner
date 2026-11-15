@@ -21,15 +21,11 @@ import {
   ArrowLeftRight,
   Zap,
   Layers,
+  CircleDot,
 } from 'lucide-react';
 import { useState } from 'react';
 import { FuturesCalculatorButton } from '@/components/FuturesCalculator';
 import { isReversePlusEnabled, withReversePlusNav } from '@/reversePlus/featureFlag';
-import {
-  // ... بقیه
-  Layers,
-  CircleDot,   // اضافه شود
-} from 'lucide-react';
 
 const baseNavItems = [
   { key: 'dashboard', path: '/', icon: LayoutDashboard },
@@ -63,12 +59,24 @@ let navItems = withReversePlusNav(baseNavItems, isReversePlusEnabled(), {
     navItems = [...navItems];
     navItems.splice(at, 0, entry);
   } else {
-    // اگر reversePlus غیرفعال بود، بعد از reverseLab
     const lab = navItems.findIndex((i) => i.key === 'reverseLab');
     navItems = [...navItems];
     navItems.splice(lab >= 0 ? lab + 1 : navItems.length, 0, entry);
   }
 }
+
+const bottomItems = [navItems[0], navItems[2], navItems[1], navItems[3]];
+
+export function Layout({ children }: { children: React.ReactNode }) {
+  const { t } = useSettings();
+  const { user, signOut } = useAuth();
+  const navigate = useNavigate();
+  const [mobileOpen, setMobileOpen] = useState(false);
+
+  const handleSignOut = async () => {
+    await signOut();
+    navigate('/login');
+  };
 
   return (
     <div className="min-h-screen flex bg-surface-0 dark:bg-surface-0">
@@ -135,19 +143,19 @@ let navItems = withReversePlusNav(baseNavItems, isReversePlusEnabled(), {
       {/* Mobile header */}
       <div className="lg:hidden fixed top-0 inset-x-0 z-40 safe-top border-b border-surface-200 dark:border-surface-200 bg-surface-50 dark:bg-surface-50">
         <div className="h-14 flex items-center justify-between px-4">
-        <div className="flex items-center gap-2">
-          <div className="w-8 h-8 rounded-lg bg-primary-600 flex items-center justify-center">
-            <LineChart className="w-4 h-4 text-white" />
+          <div className="flex items-center gap-2">
+            <div className="w-8 h-8 rounded-lg bg-primary-600 flex items-center justify-center">
+              <LineChart className="w-4 h-4 text-white" />
+            </div>
+            <span className="text-base font-bold text-slate-100">Signal Terminal</span>
           </div>
-          <span className="text-base font-bold text-slate-100">Signal Terminal</span>
-        </div>
-        <button
-          onClick={() => setMobileOpen(!mobileOpen)}
-          className="p-2 rounded-lg hover:bg-surface-100 text-slate-300"
-          aria-label="Menu"
-        >
-          {mobileOpen ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
-        </button>
+          <button
+            onClick={() => setMobileOpen(!mobileOpen)}
+            className="p-2 rounded-lg hover:bg-surface-100 text-slate-300"
+            aria-label="Menu"
+          >
+            {mobileOpen ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
+          </button>
         </div>
       </div>
 
