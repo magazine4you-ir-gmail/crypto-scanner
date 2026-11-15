@@ -1,167 +1,89 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { memo, useMemo } from 'react';
+import { quoteOf } from '@engine';
+import { QuoteChip } from '@/components/Quote';
+import { ScoreBar } from '@/components/Badges';
+import { Metric, Chip, TimeStamp } from '@/components/Responsive';
 import { useSettings } from '@/contexts/SettingsContext';
-import { Card, LoadingSpinner, ErrorState, EmptyState } from '@/components/UI';
-import { Pill, PillRow } from '@/components/Responsive';
-import { OriginalPlusSignalCard } from '@/components/OriginalPlusSignalCard';
-import { formatNumber } from '@/i18n/format';
-import {
-  fetchOutcomeCounts, fetchOutcomePage,
-  type OutcomeCounts, type OutcomeStatusFilter, type SignalOutcome,
-} from '@/services/outcomeService';
-import { FALLBACK_PUBLIC_CONFIG, fetchPublicConfig, type PlusPublicConfig } from '@/services/reversePlusService';
-import { resolvePrefs } from '@/reversePlus/scenarioPrefs';
-
-export const PAGE_SIZE = 100;
+import { formatPrice, formatNumber, formatPercent } from '@/i18n/format';
+import type { SignalOutcome } from '@/services/outcomeService';
+import type { ReverseOutcome } from '@/services/reverseOutcomeService';
+import type { PlusPublicConfig } from '@/services/reversePlusService';
+import { computeSignalSummary } from '@/reversePlus/summary';
+import { STATUS_CHIP_TONE } from '@/reversePlus/statusTone';
+import type { ScenarioPrefs } from '@/reversePlus/scenarioPrefs';
 
 interface Props {
-  /** 'signals': status filters + list.  'analysis': adds trustworthy counts and symbol / timeframe / direction filters. */
-  variant: 'signals' | 'analysis';
+  o: SignalOutcome;
+  cfg: PlusPublicConfig;
+  prefs: ScenarioPrefs;
+  onOpen: (o: SignalOutcome) => void;
 }
-
-const FILTERS: OutcomeStatusFilter[] = ['ALL', 'OPEN', 'WIN', 'LOSS', 'EXPIRED'];
-const FILTER_KEY: Record<OutcomeStatusFilter, string> = { ALL: 'all', OPEN: 'open', WIN: 'win', LOSS: 'loss', EXPIRED: 'slExpired' };
-const TIMEFRAMES = ['5m', '15m', '30m', '1h', '4h', '1d'];
 
 /**
- * The single list of Original Plus — the same layout as the Reverse Plus feed. Rows come from `signal_outcomes`
- * (Signal Lab's own table), server-side filtered and paged, newest first. Default view = OPEN signals only.
+ * THE one list card of Original Plus (Signals tab, Analysis center and Power Mix). Same template as the Reverse Plus signal
+ * card: same grid, same executable numbers (RR, leverage, risk, notional, margin, liquidation) from the same pure function
+ * (`computeSignalSummary`) and the same local scenario. An original trade has exactly the fields that function reads.
  */
-export function OriginalPlusFeed({ variant }: Props) {
+function CardImpl({ o, cfg, prefs, onOpen }: Props) {
   const { t, lang } = useSettings();
-  const navigate = useNavigate();
-  const [status, setStatus] = useState<OutcomeStatusFilter>('OPEN');
-  const [page, setPage] = useState(0);
-  const [symbol, setSymbol] = useState('');
-  const [debouncedSymbol, setDebouncedSymbol] = useState('');
-  const [timeframe, setTimeframe] = useState('');
-  const [side, setSide] = useState<'' | 'BUY' | 'SELL'>('');
-
-  const [rows, setRows] = useState<SignalOutcome[]>([]);
-  const [total, setTotal] = useState(0);
-  const [counts, setCounts] = useState<OutcomeCounts | null>(null);
-  const [cfg, setCfg] = useState<PlusPublicConfig>(FALLBACK_PUBLIC_CONFIG);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const seq = useRef(0);
-
-  useEffect(() => {
-    const id = setTimeout(() => setDebouncedSymbol(symbol), 300);
-    return () => clearTimeout(id);
-  }, [symbol]);
-
-  const load = useCallback(async () => {
-    const my = ++seq.current;
-    setLoading(true);
-    setError(null);
-    try {
-      const [pageRes, cfgRes, cnt] = await Promise.all([
-        fetchOutcomePage({
-          status, page, pageSize: PAGE_SIZE,
-          symbol: variant === 'analysis' ? debouncedSymbol : undefined,
-          timeframe: variant === 'analysis' && timeframe ? timeframe : undefined,
-          side: variant === 'analysis' && side ? side : undefined,
-        }),
-        fetchPublicConfig().catch(() => null),
-        fetchOutcomeCounts().catch(() => null),
-      ]);
-      if (my !== seq.current) return; // a newer request superseded this one
-      setRows(pageRes.rows);
-      setTotal(pageRes.total);
-      setCounts(cnt);
-      if (cfgRes) setCfg(cfgRes);
-    } catch (e) {
-      if (my === seq.current) setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      if (my === seq.current) setLoading(false);
-    }
-  }, [status, page, variant, debouncedSymbol, timeframe, side]);
-
-  useEffect(() => { void load(); }, [load]);
-
-  // the remembered leverage / amount of this browser (read again on every load so a change on the detail page shows up)
-  const prefs = useMemo(() => resolvePrefs(cfg), [cfg, rows]); // eslint-disable-line react-hooks/exhaustive-deps
-  const open = useCallback((o: SignalOutcome) => navigate(`/original-plus/signal/${encodeURIComponent(o.id)}`), [navigate]);
-
-  const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
-  const num = (v: number) => formatNumber(v, lang, 0);
-  const setFilter = (f: OutcomeStatusFilter) => { setStatus(f); setPage(0); };
-
-  const countOf = (f: OutcomeStatusFilter): number | null => {
-    if (!counts) return null;
-    return f === 'ALL' ? counts.total : f === 'OPEN' ? counts.open : f === 'WIN' ? counts.win : f === 'LOSS' ? counts.loss : counts.expired;
-  };
+  const s = useMemo(
+    () => computeSignalSummary({ rev: o as unknown as ReverseOutcome, st: null, live: null, cfg, prefs }),
+    [o, cfg, prefs],
+  );
+  const p = (v: number | null | undefined) => (v == null ? '—' : formatPrice(v, lang));
+  const n = (v: number | null, d = 2) => (v == null ? '—' : formatNumber(v, lang, d));
+  const isBuy = o.signal_type === 'BUY';
+  const pnl = o.pnl_pct == null ? null : Number(o.pnl_pct);
 
   return (
-    <div className="space-y-4">
-      {variant === 'analysis' && (
-        <Card className="!p-4 space-y-3">
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-            {(['OPEN', 'WIN', 'LOSS', 'EXPIRED'] as const).map((f) => (
-              <button
-                key={f}
-                onClick={() => setFilter(f)}
-                className={`rounded-lg p-3 text-start border transition-colors ${status === f ? 'border-primary-500/40 bg-primary-600/10' : 'border-transparent bg-surface-100 hover:bg-surface-100/70'}`}
-              >
-                <p className="text-xs text-slate-400">{t(FILTER_KEY[f])}</p>
-                <p className={`text-lg font-bold tabular-nums ${f === 'WIN' ? 'text-success-400' : f === 'LOSS' ? 'text-error-400' : f === 'OPEN' ? 'text-warning-400' : 'text-slate-300'}`}>
-                  {counts ? num(countOf(f) ?? 0) : '—'}
-                </p>
-              </button>
-            ))}
+    <button
+      onClick={() => onOpen(o)}
+      className="card w-full text-start p-3 space-y-3 active:bg-surface-100 hover:bg-surface-100/80 transition-colors"
+    >
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-base font-bold text-slate-100">{o.base_asset}</span>
+            <QuoteChip quote={quoteOf(o.symbol)} />
+            <Chip>{o.timeframe}</Chip>
           </div>
-          <p className="text-[11px] text-slate-500 leading-relaxed">{t('opCountsHint')}</p>
-        </Card>
-      )}
+          <div className="flex items-center gap-2 mt-1.5 flex-wrap">
+            <span className={isBuy ? 'signal-buy' : 'signal-sell'}>{isBuy ? t('buy') : t('asShort')}</span>
+            <Chip tone={STATUS_CHIP_TONE[o.status]}>{t(`rpSt${o.status}`)}</Chip>
+          </div>
+        </div>
+        <div className="text-end shrink-0 space-y-0.5">
+          <ScoreBar score={o.score} />
+          {pnl === null
+            ? <p className="text-sm text-slate-500">—</p>
+            : <p className={`text-sm font-semibold tabular-nums ${pnl >= 0 ? 'text-success-400' : 'text-error-400'}`}>{formatPercent(pnl, lang)}</p>}
+        </div>
+      </div>
 
-      <Card className="!p-3 sm:!p-4 space-y-3">
-        <PillRow>
-          {FILTERS.map((f) => (
-            <Pill key={f} active={status === f} onClick={() => setFilter(f)}>
-              {t(FILTER_KEY[f])}{countOf(f) !== null ? ` (${num(countOf(f) as number)})` : ''}
-            </Pill>
-          ))}
-        </PillRow>
-        {variant === 'analysis' && (
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-            <input
-              className="input-field text-sm col-span-2 sm:col-span-1"
-              value={symbol}
-              onChange={(e) => { setSymbol(e.target.value); setPage(0); }}
-              placeholder={t('rpSearchSymbol')}
-              aria-label={t('rpSearchSymbol')}
-            />
-            <select className="input-field text-sm" value={side} onChange={(e) => { setSide(e.target.value as '' | 'BUY' | 'SELL'); setPage(0); }}>
-              <option value="">{t('rpAllDirections')}</option>
-              <option value="BUY">{t('buy')}</option>
-              <option value="SELL">{t('asShort')}</option>
-            </select>
-            <select className="input-field text-sm" value={timeframe} onChange={(e) => { setTimeframe(e.target.value); setPage(0); }}>
-              <option value="">{t('rpAllTimeframes')}</option>
-              {TIMEFRAMES.map((x) => <option key={x} value={x}>{x.toUpperCase()}</option>)}
-            </select>
-          </div>
-        )}
-        <p className="text-[11px] text-slate-500">{t('rpListHint')}</p>
-      </Card>
+      <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-3 gap-y-2 rounded-lg bg-surface-100/60 p-2.5">
+        <Metric label={t('price')} value={p(Number(o.price_at_signal))} />
+        <Metric label={t('rpExitPrice')} value={o.status === 'OPEN' ? '—' : p(o.exit_price)} />
+        <div className="col-span-2 sm:col-span-1 min-w-0">
+          <Metric label={t('rpEntryZone')} value={s.zoneLow != null && s.zoneHigh != null ? `${p(s.zoneLow)} – ${p(s.zoneHigh)}` : '—'} />
+        </div>
+        <Metric label={t('stopLoss')} value={p(s.stop)} tone="text-error-400" />
+        <Metric label={t('asTarget')} value={p(s.target)} tone="text-success-400" />
+        <Metric label="R" value={o.r_multiple == null ? '—' : `${Number(o.r_multiple) >= 0 ? '+' : ''}${formatNumber(Number(o.r_multiple), lang, 2)}`} />
+        <Metric label={t('rpRrNet')} value={n(s.rrNet)} />
+        <Metric label={t('rpRrGross')} value={n(s.rrGross)} />
+        <Metric label={t('rpLeverage')} value={`${formatNumber(s.leverage, lang, 0)}x`} tone="text-warning-400" />
+        <Metric label={t('rpRiskUsd')} value={n(s.riskUsd, 2)} />
+        <Metric label={t('rpNotional')} value={n(s.notional, 2)} />
+        <Metric label={t('rpMargin')} value={n(s.margin, 2)} />
+        <Metric label={t('rpLiq')} value={s.liq == null ? '—' : `≈ ${p(s.liq)}`} tone="text-warning-400" />
+      </div>
 
-      {loading ? <LoadingSpinner /> : error ? <ErrorState message={error} onRetry={() => void load()} /> : rows.length === 0 ? (
-        <EmptyState message={status === 'OPEN' && !debouncedSymbol && !timeframe && !side ? t('opNoOpen') : t('opNoMatch')} />
-      ) : (
-        <>
-          <p className="text-xs text-slate-400">{num(total)} {t('rpResults')}</p>
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-2.5">
-            {rows.map((o) => <OriginalPlusSignalCard key={o.id} o={o} cfg={cfg} prefs={prefs} onOpen={open} />)}
-          </div>
-          {total > PAGE_SIZE && (
-            <div className="flex items-center justify-between gap-3">
-              <button className="btn-secondary text-xs" disabled={page === 0} onClick={() => setPage((p) => Math.max(0, p - 1))}>{t('rpPrev')}</button>
-              <span className="text-xs text-slate-400 tabular-nums">{t('rpPage')} {num(page + 1)} {t('rpOf')} {num(pageCount)}</span>
-              <button className="btn-secondary text-xs" disabled={page >= pageCount - 1} onClick={() => setPage((p) => Math.min(pageCount - 1, p + 1))}>{t('rpNext')}</button>
-            </div>
-          )}
-        </>
-      )}
-    </div>
+      <div className="border-t border-surface-200 pt-2 flex items-center justify-between gap-2">
+        <TimeStamp value={o.candle_close_time ?? o.signal_at} label={t('rpSignalTime')} compact />
+        <span className="text-xs text-primary-400 shrink-0">{t('rpOpenDetails')}</span>
+      </div>
+    </button>
   );
 }
+
+export const OriginalPlusSignalCard = memo(CardImpl);
