@@ -83,8 +83,8 @@ function AppRoutes() {
       <Route path="/power-mix" element={<AppRoute><PowerMixPage /></AppRoute>} />
       <Route path="/scalp" element={<AppRoute><ScalpPage /></AppRoute>} />
       <Route path="/original-plus/signal/:id" element={<AppRoute><OriginalPlusSignalPage /></AppRoute>} />
-
-
+      <Route path="/original-plus" element={<AppRoute><OriginalPlusPage /></AppRoute>} />
+      <Route path="/original-plus/signal/:id" element={<AppRoute><OriginalPlusSignalPage /></AppRoute>} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );
