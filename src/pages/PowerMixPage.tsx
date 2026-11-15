@@ -29,10 +29,19 @@ import { DAY_MS } from '@/powerMix/tehranTime';
 
 type StatusTab = 'ALL' | OutcomeStatus;
 type Dir = 'ALL' | 'BUY' | 'SELL';
+type TimeRange = '1d' | '7d' | '30d' | '90d' | 'ALL';
 
 const PAGE = 40;
 const REFRESH_MS = 60_000;
 const DAY_FILTERS: DayFilter[] = ['ALL', 'VERY_STRONG', 'POWER', 'MIXED', 'NEUTRAL', 'DEAD', 'PENDING'];
+
+const TIME_RANGE_OPTIONS: { key: TimeRange; days: number | null }[] = [
+  { key: '1d', days: 1 },
+  { key: '7d', days: 7 },
+  { key: '30d', days: 30 },
+  { key: '90d', days: 90 },
+  { key: 'ALL', days: null },
+];
 
 function mergeCandles(prev: BtcCandle[], fresh: BtcCandle[]): BtcCandle[] {
   const m = new Map(prev.map((c) => [c.openTime, c]));
@@ -59,6 +68,7 @@ export function PowerMixPage() {
   const [view, setView] = useState<MixView>('MIX');
   const [invert, setInvert] = useState(false);
   const [dayFilter, setDayFilter] = useState<DayFilter>('ALL');
+  const [timeRange, setTimeRange] = useState<TimeRange>('ALL');
   const [tab, setTab] = useState<StatusTab>('ALL');
   const [tf, setTf] = useState('ALL');
   const [dir, setDir] = useState<Dir>('ALL');
@@ -122,8 +132,20 @@ export function PowerMixPage() {
   const analyzer = useMemo(() => createDayAnalyzer(candles, cfg, nowMs), [candles, cfg, nowMs]);
   const live = useMemo(() => analyzer.live(), [analyzer]);
   const rows = useMemo(() => buildMixRows(pairs, analyzer), [pairs, analyzer]);
-  const dayRows = useMemo(() => rows.filter((r) => matchesDayFilter(r, dayFilter)), [rows, dayFilter]);
-  const dayCounts = useMemo(() => Object.fromEntries(DAY_FILTERS.map((f) => [f, rows.filter((r) => matchesDayFilter(r, f)).length])) as Record<DayFilter, number>, [rows]);
+
+  // فیلتر زمان (سیگنال‌هایی که در بازه انتخابی تولید شده‌اند)
+  const timeFilteredRows = useMemo(() => {
+    const opt = TIME_RANGE_OPTIONS.find((o) => o.key === timeRange);
+    if (!opt || opt.days == null) return rows;
+    const cutoff = nowMs - opt.days * DAY_MS;
+    return rows.filter((r) => r.signalMs >= cutoff);
+  }, [rows, timeRange, nowMs]);
+
+  const dayRows = useMemo(() => timeFilteredRows.filter((r) => matchesDayFilter(r, dayFilter)), [timeFilteredRows, dayFilter]);
+  const dayCounts = useMemo(
+    () => Object.fromEntries(DAY_FILTERS.map((f) => [f, timeFilteredRows.filter((r) => matchesDayFilter(r, f)).length])) as Record<DayFilter, number>,
+    [timeFilteredRows],
+  );
 
   const views = useMemo(() => buildViews(dayRows, cfg, invert), [dayRows, cfg, invert]);
   const statsOriginal = useMemo(() => computeStats(views.original), [views]);
@@ -155,7 +177,7 @@ export function PowerMixPage() {
     let alive = true;
     void fetchEvaluationsForIds(missing)
       .then((m) => { if (alive) setEvals((prev) => new Map([...prev, ...m])); })
-      .catch(() => undefined); // enrichment is best-effort: the card renders without it
+      .catch(() => undefined);
     return () => { alive = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [idsKey]);
@@ -203,6 +225,16 @@ export function PowerMixPage() {
   ];
   const dayLabel = (f: DayFilter) => (f === 'ALL' ? t('pmAllDays') : f === 'DEAD' ? t('pmDead') : f === 'PENDING' ? t('pmPending') : t(`pmClass${f}`));
 
+  const timeRangeLabel = (key: TimeRange) => {
+    switch (key) {
+      case '1d': return lang === 'fa' ? '۱ روز' : '1 day';
+      case '7d': return lang === 'fa' ? '۱ هفته' : '1 week';
+      case '30d': return lang === 'fa' ? '۱ ماه' : '1 month';
+      case '90d': return lang === 'fa' ? '۳ ماه' : '3 months';
+      default: return lang === 'fa' ? 'همه زمان‌ها' : 'All time';
+    }
+  };
+
   return (
     <div className="space-y-4 sm:space-y-6">
       <div className="flex items-center justify-between gap-3">
@@ -218,6 +250,14 @@ export function PowerMixPage() {
 
       {!loading && !error && (
         <>
+          {/* تنظیمات منتقل‌شده به بالای صفحه */}
+          <PowerMixSettingsPanel
+            value={cfg}
+            personal={personal !== null}
+            onSave={(c) => { saveLocalOverride(c); setPersonal(c); }}
+            onReset={() => { clearLocalOverride(); setPersonal(null); }}
+          />
+
           <PowerMixLiveCard live={live} cfg={cfg} />
           {noCandles && <p className="text-xs text-warning-400">{t('pmNoCandles')}</p>}
 
@@ -243,6 +283,23 @@ export function PowerMixPage() {
                   <Pill active={invert} onClick={() => setInvert((x) => !x)}>{t('pmInvert')}</Pill>
                 </PillRow>
                 {invert && <p className="text-[11px] text-warning-400">{t('pmInvertOn')}</p>}
+
+                {/* فیلتر زمان */}
+                <div className="space-y-1.5">
+                  <p className="text-[11px] text-slate-500">{lang === 'fa' ? 'بازه زمانی' : 'Time range'}</p>
+                  <PillRow>
+                    {TIME_RANGE_OPTIONS.map((o) => (
+                      <Pill
+                        key={o.key}
+                        active={timeRange === o.key}
+                        onClick={() => { setTimeRange(o.key); setShown(PAGE); }}
+                      >
+                        {timeRangeLabel(o.key)}
+                      </Pill>
+                    ))}
+                  </PillRow>
+                </div>
+
                 <div className="space-y-1.5">
                   <p className="text-[11px] text-slate-500">{t('pmDayType')}</p>
                   <PillRow>
@@ -351,13 +408,6 @@ export function PowerMixPage() {
               )}
             </>
           )}
-
-          <PowerMixSettingsPanel
-            value={cfg}
-            personal={personal !== null}
-            onSave={(c) => { saveLocalOverride(c); setPersonal(c); }}
-            onReset={() => { clearLocalOverride(); setPersonal(null); }}
-          />
 
           <Disclaimer />
         </>
