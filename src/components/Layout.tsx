@@ -25,6 +25,11 @@ import {
 import { useState } from 'react';
 import { FuturesCalculatorButton } from '@/components/FuturesCalculator';
 import { isReversePlusEnabled, withReversePlusNav } from '@/reversePlus/featureFlag';
+import {
+  // ... بقیه
+  Layers,
+  CircleDot,   // اضافه شود
+} from 'lucide-react';
 
 const baseNavItems = [
   { key: 'dashboard', path: '/', icon: LayoutDashboard },
@@ -43,21 +48,27 @@ const baseNavItems = [
   { key: 'profile', path: '/profile', icon: UserIcon },
 ];
 
-// Reverse Signal Plus adds ONE menu entry (only when its feature flag is on); the list is otherwise unchanged
-const navItems = withReversePlusNav(baseNavItems, isReversePlusEnabled(), { key: 'reversePlus', path: '/reverse-plus', icon: ArrowLeftRight });
+// اول معکوس پلاس (بعد از reverseLab)
+let navItems = withReversePlusNav(baseNavItems, isReversePlusEnabled(), {
+  key: 'reversePlus',
+  path: '/reverse-plus',
+  icon: ArrowLeftRight,
+});
 
-const bottomItems = [navItems[0], navItems[2], navItems[1], navItems[3]];
-
-export function Layout({ children }: { children: React.ReactNode }) {
-  const { t } = useSettings();
-  const { user, signOut } = useAuth();
-  const navigate = useNavigate();
-  const [mobileOpen, setMobileOpen] = useState(false);
-
-  const handleSignOut = async () => {
-    await signOut();
-    navigate('/login');
-  };
+// اصلی پلاس دقیقاً بالای معکوس پلاس
+{
+  const entry = { key: 'originalPlus', path: '/original-plus', icon: CircleDot };
+  const at = navItems.findIndex((i) => i.key === 'reversePlus');
+  if (at >= 0) {
+    navItems = [...navItems];
+    navItems.splice(at, 0, entry);
+  } else {
+    // اگر reversePlus غیرفعال بود، بعد از reverseLab
+    const lab = navItems.findIndex((i) => i.key === 'reverseLab');
+    navItems = [...navItems];
+    navItems.splice(lab >= 0 ? lab + 1 : navItems.length, 0, entry);
+  }
+}
 
   return (
     <div className="min-h-screen flex bg-surface-0 dark:bg-surface-0">
