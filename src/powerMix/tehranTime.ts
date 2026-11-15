@@ -33,3 +33,14 @@ export function formatHHMM(minutes: number): string {
 export function roundToSecond(ms: number): number {
   return Math.round(ms / 1000) * 1000;
 }
+/**
+ * شروع روز معاملاتی = 00:00 UTC = 03:30 تهران (هم‌تراز کندل روزانهٔ رایج).
+ */
+export function cryptoDayStart(ms: number): number {
+  return Math.floor(ms / DAY_MS) * DAY_MS;
+}
+
+/** کلید روز معاملاتی (تاریخ UTC آن روز). */
+export function cryptoDayKey(ms: number): string {
+  return new Date(cryptoDayStart(ms)).toISOString().slice(0, 10);
+}
