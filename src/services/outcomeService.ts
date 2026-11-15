@@ -65,6 +65,52 @@ export async function fetchOutcomesBySymbol(symbol: string, limit = 30): Promise
   return (data ?? []) as SignalOutcome[];
 }
 
+export type OutcomeStatusFilter = 'ALL' | 'OPEN' | 'WIN' | 'LOSS' | 'EXPIRED';
+
+export interface OutcomePageQuery {
+  status: OutcomeStatusFilter;
+  /** 0-based */
+  page: number;
+  pageSize?: number;
+  symbol?: string;
+  timeframe?: string;
+  side?: OutcomeSignalType;
+}
+
+/**
+ * One server-side page of ORIGINAL signals, newest first, straight from `signal_outcomes` (same table and same CANCELLED
+ * exclusion as Signal Lab). Mirror of `fetchReverseOutcomePage`.
+ */
+export async function fetchOutcomePage(q: OutcomePageQuery): Promise<{ rows: SignalOutcome[]; total: number }> {
+  const size = q.pageSize ?? 100;
+  const from = q.page * size;
+  let query = supabase.from('signal_outcomes').select('*', { count: 'exact' }).neq('status', 'CANCELLED');
+  if (q.status !== 'ALL') query = query.eq('status', q.status);
+  if (q.timeframe) query = query.ilike('timeframe', q.timeframe); // exact, case-insensitive (15m / 15M)
+  if (q.side) query = query.eq('signal_type', q.side);
+  const sym = q.symbol?.trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
+  if (sym) query = query.ilike('symbol', `%${sym}%`);
+  const { data, error, count } = await query
+    .order('signal_at', { ascending: false })
+    .order('id', { ascending: false }) // stable order across pages
+    .range(from, from + size - 1);
+  if (error) throw new Error(error.message);
+  return { rows: (data ?? []) as SignalOutcome[], total: count ?? 0 };
+}
+
+export interface OutcomeCounts { open: number; win: number; loss: number; expired: number; total: number }
+
+/** Exact head-counts on `signal_outcomes` (CANCELLED excluded). */
+export async function fetchOutcomeCounts(): Promise<OutcomeCounts> {
+  const one = async (status: Exclude<OutcomeStatusFilter, 'ALL'>): Promise<number> => {
+    const { count, error } = await supabase.from('signal_outcomes').select('id', { count: 'exact', head: true }).eq('status', status);
+    if (error) throw new Error(error.message);
+    return count ?? 0;
+  };
+  const [open, win, loss, expired] = await Promise.all([one('OPEN'), one('WIN'), one('LOSS'), one('EXPIRED')]);
+  return { open, win, loss, expired, total: open + win + loss + expired };
+}
+
 interface Bucket {
   wins: number;
   losses: number;
