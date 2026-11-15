@@ -185,15 +185,15 @@ export function PowerMixPage() {
   const prefs = useMemo(() => resolvePrefs(publicCfg), [publicCfg, pairs]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const openRow = useCallback((row: MixRow, side: 'original' | 'reverse') => {
-    const o = row.original;
-    if (side === 'reverse') {
-      navigate(isReversePlusEnabled()
-        ? `/reverse-plus/signal/${encodeURIComponent(row.reverse.id)}`
-        : `/asset/${row.reverse.symbol}?tf=${encodeURIComponent(row.reverse.timeframe)}&outcome=${encodeURIComponent(row.reverse.id)}&reverse=1`);
-    } else {
-      navigate(`/asset/${o.symbol}?tf=${encodeURIComponent(o.timeframe)}&outcome=${encodeURIComponent(o.id)}`);
-    }
-  }, [navigate]);
+  if (side === 'reverse') {
+    navigate(isReversePlusEnabled()
+      ? `/reverse-plus/signal/${encodeURIComponent(row.reverse.id)}`
+      : `/asset/${row.reverse.symbol}?tf=${encodeURIComponent(row.reverse.timeframe)}&outcome=${encodeURIComponent(row.reverse.id)}&reverse=1`);
+  } else {
+    // سیگنال اصلی → صفحه جزئیات Original Plus (همان مدل Reverse Plus)
+    navigate(`/original-plus/signal/${encodeURIComponent(row.original.id)}`);
+  }
+}, [navigate]);
 
   const header = (
     <div className="flex items-center gap-3 min-w-0">
