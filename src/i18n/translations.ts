@@ -1,5 +1,12 @@
 import { reversePlusTranslations } from './reversePlusTranslations';
 import { powerMixTranslations } from './powerMixTranslations';
+import { originalPlusTranslations } from './originalPlusTranslations';
+
+// ...
+
+for (const [k, v] of Object.entries(originalPlusTranslations)) {
+  if (!(k in translations)) translations[k] = v;
+}
 
 export type Lang = 'fa' | 'en';
 
