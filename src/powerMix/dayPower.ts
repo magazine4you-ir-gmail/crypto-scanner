@@ -8,10 +8,19 @@
 //   Power       : exactly one of the two windows reaches the threshold
 //   Neutral     : neither reaches it
 //
+// Day boundary for POWER / "move since day start":
+//   crypto day = 00:00 UTC = 03:30 Tehran (common exchange daily candle open).
+//
+// London / US / dead-hours still use Tehran WALL CLOCK (minutes since 00:00 Tehran calendar).
+// So config values like london 11:30 stay at 11:30 Tehran — they do not shift when the power-day resets at 03:30.
+//
 // Two classification modes for a signal at time T:
-//   * locked (default / historical stats) — waits until the US window is closed (relative to "now"), then uses the full day.
-//   * executable — uses ONLY information available at T (completed windows up to T, else day-move 00:00→T). Never waits for the future.
-import { DAY_MS, MINUTE_MS, roundToSecond, tehranDayKey, tehranDayStart } from './tehranTime';
+//   * locked      — waits until the US window is closed (relative to "now"), then uses the full calendar windows.
+//   * executable  — uses ONLY information available at T. Never waits for the future.
+import {
+  DAY_MS, MINUTE_MS, roundToSecond,
+  tehranDayStart, cryptoDayStart, cryptoDayKey,
+} from './tehranTime';
 import type { DayClass, PowerMixConfig, SidePick } from './config';
 
 export interface BtcCandle {
@@ -35,6 +44,7 @@ export type ClassifyMode = 'locked' | 'executable';
 
 export interface SignalDayInfo {
   dayKey: string;
+  /** UTC ms of crypto-day open (00:00 UTC / 03:30 Tehran) */
   dayStart: number;
   state: DayState;
   /** null while PENDING / NO_DATA */
@@ -44,7 +54,7 @@ export interface SignalDayInfo {
   /** net BTC move of the London / US window in %, null when the window has no data yet */
   londonPct: number | null;
   usPct: number | null;
-  /** dead-hours / executable mid-day: 00:00 -> signal time. pending locked: 00:00 -> now. otherwise null */
+  /** move from crypto-day open (03:30 Tehran) to signal/now, when relevant */
   dayMovePct: number | null;
   /** PENDING only: where the day is heading right now */
   tendency: Tendency | null;
@@ -59,7 +69,7 @@ export interface LiveStatus {
   usComplete: boolean;
   /** what to use right now: a side, or WAIT when nothing can be said yet */
   pick: SidePick | 'WAIT';
-  /** true when the pick is only based on the approximate tendency of a still-pending day */
+  /** true when the pick can still change before the US window locks (locked mode still pending) */
   approximate: boolean;
 }
 
@@ -90,7 +100,7 @@ export function createDayAnalyzer(candles: BtcCandle[], cfg: PowerMixConfig, now
   const idx = buildIndex(candles);
   const winCache = new Map<string, WindowStats>();
 
-  /** Window stats as of `asOfMs` (not always global now — needed for executable mode). */
+  /** Window stats as of `asOfMs`. */
   const windowStats = (startMs: number, endMs: number, asOfMs: number): WindowStats => {
     const key = `${startMs}:${endMs}:${asOfMs}`;
     const hit = winCache.get(key);
@@ -112,31 +122,39 @@ export function createDayAnalyzer(candles: BtcCandle[], cfg: PowerMixConfig, now
     return out;
   };
 
-  const dayWindows = (dayStart: number, asOfMs: number) => ({
-    london: windowStats(dayStart + cfg.london.start * MINUTE_MS, dayStart + cfg.london.end * MINUTE_MS, asOfMs),
-    us: windowStats(dayStart + cfg.us.start * MINUTE_MS, dayStart + cfg.us.end * MINUTE_MS, asOfMs),
+  /**
+   * London / US windows are Tehran WALL CLOCK times in config (minutes since 00:00 Tehran).
+   * `calDayStart` must be tehranDayStart(...), never cryptoDayStart.
+   */
+  const dayWindows = (calDayStart: number, asOfMs: number) => ({
+    london: windowStats(calDayStart + cfg.london.start * MINUTE_MS, calDayStart + cfg.london.end * MINUTE_MS, asOfMs),
+    us: windowStats(calDayStart + cfg.us.start * MINUTE_MS, calDayStart + cfg.us.end * MINUTE_MS, asOfMs),
   });
 
-  /** close of the last candle that OPENED before `ms` (and on/after day start) — i.e. the price at that moment */
-  const priceAt = (dayStart: number, ms: number): number | null => {
+  /**
+   * Price at moment `ms`, looking at 30m candles whose open is before `ms`.
+   * `anchorStart` limits how far back we search (crypto day open or calendar midnight).
+   */
+  const priceAt = (anchorStart: number, ms: number): number | null => {
     let t = Math.floor((Math.min(ms, nowMs) - 1) / STEP_MS) * STEP_MS;
-    for (let i = 0; i < 6 && t >= dayStart; i++, t -= STEP_MS) {
+    for (let i = 0; i < 12 && t >= anchorStart; i++, t -= STEP_MS) {
       const c = idx.get(t);
       if (c) return c.close;
     }
     return null;
   };
 
-  const dayMovePct = (dayStart: number, ms: number): number | null => {
-    const open = idx.get(dayStart)?.open;
-    const p = priceAt(dayStart, ms);
+  /** Net move from crypto-day open (03:30 Tehran / 00:00 UTC) to `ms`. */
+  const dayMovePct = (cryptoStart: number, ms: number): number | null => {
+    const open = idx.get(cryptoStart)?.open;
+    const p = priceAt(cryptoStart, ms);
     return open && open > 0 && p !== null ? ((p - open) / open) * 100 : null;
   };
 
-  const volumeBaseline = (dayStart: number): number | null => {
+  const volumeBaseline = (calDayStart: number): number | null => {
     const vols: number[] = [];
     for (let k = 1; k <= BASELINE_DAYS; k++) {
-      const w = dayWindows(dayStart - k * DAY_MS, nowMs);
+      const w = dayWindows(calDayStart - k * DAY_MS, nowMs);
       if (w.london.complete && w.us.complete) vols.push(w.london.volume + w.us.volume);
     }
     if (vols.length < MIN_BASELINE_DAYS) return null;
@@ -145,21 +163,23 @@ export function createDayAnalyzer(candles: BtcCandle[], cfg: PowerMixConfig, now
     return vols.length % 2 ? vols[mid] : (vols[mid - 1] + vols[mid]) / 2;
   };
 
-  const isLowVolume = (dayStart: number, asOfMs: number): boolean => {
+  const isLowVolume = (calDayStart: number, asOfMs: number): boolean => {
     if (cfg.lowVolumeRatio <= 0) return false;
-    const w = dayWindows(dayStart, asOfMs);
+    const w = dayWindows(calDayStart, asOfMs);
     if (!w.london.complete || !w.us.complete) return false;
-    const base = volumeBaseline(dayStart);
+    const base = volumeBaseline(calDayStart);
     return base !== null && base > 0 && w.london.volume + w.us.volume < base * cfg.lowVolumeRatio;
   };
 
+  /** `tod` = minutes since 00:00 Tehran (wall clock). */
   const isDead = (tod: number) => (tod >= cfg.dead.start && tod < cfg.dead.end) || tod >= cfg.dead.lateStart;
 
   function classifyDeadOrNoData(
     base: Omit<SignalDayInfo, 'state' | 'dayClass' | 'dayMovePct' | 'tendency'>,
+    cryptoStart: number,
     T: number,
   ): SignalDayInfo {
-    const mv = dayMovePct(base.dayStart, T);
+    const mv = dayMovePct(cryptoStart, T);
     if (mv === null) return { ...base, state: 'NO_DATA', dayClass: null, dayMovePct: null, tendency: null };
     return {
       ...base,
@@ -171,77 +191,94 @@ export function createDayAnalyzer(candles: BtcCandle[], cfg: PowerMixConfig, now
   }
 
   /**
-   * Locked mode (historical / end-of-day knowledge):
-   * windows are measured against global nowMs so past days become FINAL with full London+US.
+   * Locked mode: windows measured against global nowMs so past days become FINAL with full London+US.
+   * Day power / day-move open = crypto day (03:30 Tehran).
    */
   function classifyLocked(signalMs: number): SignalDayInfo {
     const T = roundToSecond(signalMs);
-
-// مبدأ قدرت روز / حرکت روز = 03:30 تهران
-const dayStart = cryptoDayStart(T);
-
-// ساعت روی دیوار تهران برای لندن/آمریکا/مرده (00:00 تقویم تهران)
-const calDayStart = tehranDayStart(T);
-const tod = (T - calDayStart) / MINUTE_MS; // همان 0..1440 قبلی
+    const cryptoStart = cryptoDayStart(T);
+    const calDayStart = tehranDayStart(T);
+    const tod = (T - calDayStart) / MINUTE_MS;
     const dead = isDead(tod);
-    const w = dayWindows(dayStart, nowMs);
+    const w = dayWindows(calDayStart, nowMs);
     const base = {
-      dayKey: tehranDayKey(T), dayStart, deadHours: dead,
-      lowVolume: isLowVolume(dayStart, nowMs),
-      londonPct: w.london.movePct, usPct: w.us.movePct,
+      dayKey: cryptoDayKey(T),
+      dayStart: cryptoStart,
+      deadHours: dead,
+      lowVolume: isLowVolume(calDayStart, nowMs),
+      londonPct: w.london.movePct,
+      usPct: w.us.movePct,
     };
 
-    if (dead) return classifyDeadOrNoData(base, T);
+    if (dead) return classifyDeadOrNoData(base, cryptoStart, T);
 
     if (w.london.complete && w.us.complete) {
-      return { ...base, state: 'FINAL', dayClass: classifyWindows(w.london.movePct, w.us.movePct, cfg.thresholdPct), dayMovePct: null, tendency: null };
+      return {
+        ...base,
+        state: 'FINAL',
+        dayClass: classifyWindows(w.london.movePct, w.us.movePct, cfg.thresholdPct),
+        dayMovePct: dayMovePct(cryptoStart, T),
+        tendency: null,
+      };
     }
-    if (w.london.missing || w.us.missing) return { ...base, state: 'NO_DATA', dayClass: null, dayMovePct: null, tendency: null };
+    if (w.london.missing || w.us.missing) {
+      return { ...base, state: 'NO_DATA', dayClass: null, dayMovePct: null, tendency: null };
+    }
 
-    const mv = dayMovePct(dayStart, nowMs);
-    return { ...base, state: 'PENDING', dayClass: null, dayMovePct: mv, tendency: tendencyOf(mv, cfg.thresholdPct) };
+    const mv = dayMovePct(cryptoStart, nowMs);
+    return {
+      ...base,
+      state: 'PENDING',
+      dayClass: null,
+      dayMovePct: mv,
+      tendency: tendencyOf(mv, cfg.thresholdPct),
+    };
   }
 
   /**
-   * Executable mode (only info known at signal time T):
-   * - dead hours: same as locked
-   * - both key windows already closed by T: full classifyWindows
-   * - only some windows closed by T: classifyWindows on completed ones only (incomplete = null)
-   * - none closed yet: day-move 00:00→T → POWER / NEUTRAL
-   * Never PENDING: a live trader must pick a side at T.
+   * Executable mode: only info known at signal time T.
+   * - dead hours → move from crypto open to T
+   * - both windows closed by T → full classifyWindows
+   * - only some windows closed by T → classifyWindows on completed ones only
+   * - none closed yet → move crypto open → T → POWER / NEUTRAL
+   * Never PENDING when price data exists.
    */
   function classifyExecutable(signalMs: number): SignalDayInfo {
     const T = roundToSecond(signalMs);
     const asOf = Math.min(T, nowMs);
-    const dayStart = tehranDayStart(T);
-    const tod = (T - dayStart) / MINUTE_MS;
+    const cryptoStart = cryptoDayStart(T);
+    const calDayStart = tehranDayStart(T);
+    const tod = (T - calDayStart) / MINUTE_MS;
     const dead = isDead(tod);
-    const w = dayWindows(dayStart, asOf);
+    const w = dayWindows(calDayStart, asOf);
     const base = {
-      dayKey: tehranDayKey(T), dayStart, deadHours: dead,
-      lowVolume: isLowVolume(dayStart, asOf),
-      londonPct: w.london.movePct, usPct: w.us.movePct,
+      dayKey: cryptoDayKey(T),
+      dayStart: cryptoStart,
+      deadHours: dead,
+      lowVolume: isLowVolume(calDayStart, asOf),
+      londonPct: w.london.movePct,
+      usPct: w.us.movePct,
     };
 
-    if (dead) return classifyDeadOrNoData(base, T);
+    if (dead) return classifyDeadOrNoData(base, cryptoStart, T);
 
-    // Completed windows only — do not feed partial in-progress window moves as if they were final.
     const londonDone = w.london.complete ? w.london.movePct : null;
     const usDone = w.us.complete ? w.us.movePct : null;
 
     if (w.london.complete && w.us.complete) {
-      if (w.london.missing || w.us.missing) return { ...base, state: 'NO_DATA', dayClass: null, dayMovePct: null, tendency: null };
+      if (w.london.missing || w.us.missing) {
+        return { ...base, state: 'NO_DATA', dayClass: null, dayMovePct: null, tendency: null };
+      }
       return {
         ...base,
         state: 'FINAL',
         dayClass: classifyWindows(londonDone, usDone, cfg.thresholdPct),
-        dayMovePct: null,
+        dayMovePct: dayMovePct(cryptoStart, T),
         tendency: null,
       };
     }
 
     if (w.london.complete || w.us.complete) {
-      // One window finished before the signal; the other has not — class from the finished one only.
       if ((w.london.complete && w.london.missing) || (w.us.complete && w.us.missing)) {
         return { ...base, state: 'NO_DATA', dayClass: null, dayMovePct: null, tendency: null };
       }
@@ -249,13 +286,12 @@ const tod = (T - calDayStart) / MINUTE_MS; // همان 0..1440 قبلی
         ...base,
         state: 'FINAL',
         dayClass: classifyWindows(londonDone, usDone, cfg.thresholdPct),
-        dayMovePct: dayMovePct(dayStart, T),
+        dayMovePct: dayMovePct(cryptoStart, T),
         tendency: null,
       };
     }
 
-    // Neither key window closed yet at T → same geometry as dead-hours (00:00 → T).
-    return classifyDeadOrNoData(base, T);
+    return classifyDeadOrNoData(base, cryptoStart, T);
   }
 
   function classify(signalMs: number, mode: ClassifyMode = 'locked'): SignalDayInfo {
@@ -263,10 +299,11 @@ const tod = (T - calDayStart) / MINUTE_MS; // همان 0..1440 قبلی
   }
 
   function live(): LiveStatus {
-    // Live recommendation for a trader acting *now* = executable classification at now.
     const infoExec = classifyExecutable(nowMs);
     const infoLocked = classifyLocked(nowMs);
-    const w = dayWindows(infoLocked.dayStart, nowMs);
+    const calDayStart = tehranDayStart(nowMs);
+    const w = dayWindows(calDayStart, nowMs);
+
     let price: number | null = null;
     for (let t = Math.floor(nowMs / STEP_MS) * STEP_MS, i = 0; i < 6; i++, t -= STEP_MS) {
       const c = idx.get(t);
@@ -278,18 +315,18 @@ const tod = (T - calDayStart) / MINUTE_MS; // همان 0..1440 قبلی
 
     if (infoExec.state === 'FINAL' && infoExec.dayClass) {
       pick = cfg.selection[infoExec.dayClass];
-      // Still show approximate hint while locked mode would still be pending (day not fully closed).
       approximate = infoLocked.state === 'PENDING';
     } else if (infoLocked.state === 'PENDING' && infoLocked.tendency) {
-      // Fallback if executable had no data
       approximate = true;
       pick = infoLocked.tendency === 'FLAT' ? cfg.selection.NEUTRAL : cfg.selection.POWER;
     }
 
-    // Card shows locked windows progress + executable pick.
+    // Card: show locked progress of windows while day is open; otherwise executable final info.
+    const info = infoLocked.state === 'PENDING' ? infoLocked : infoExec;
+
     return {
       nowMs,
-      info: infoLocked.state === 'PENDING' ? infoLocked : infoExec,
+      info,
       price,
       londonComplete: w.london.complete,
       usComplete: w.us.complete,
