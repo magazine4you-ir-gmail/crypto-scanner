@@ -2,17 +2,19 @@ import { reversePlusTranslations } from './reversePlusTranslations';
 import { powerMixTranslations } from './powerMixTranslations';
 import { originalPlusTranslations } from './originalPlusTranslations';
 
-// ...
-
-for (const [k, v] of Object.entries(originalPlusTranslations)) {
-  if (!(k in translations)) translations[k] = v;
-}
-
 export type Lang = 'fa' | 'en';
 
 export interface Translations {
   [key: string]: { fa: string; en: string };
 }
+
+export const translations: Translations = {
+  // Navigation
+  dashboard: { fa: 'داشبورد', en: 'Dashboard' },
+  // ...
+  originalPlus: { fa: 'اصلی پلاس', en: 'Original Plus' },
+  // ... بقیه کلیدها مثل قبل تا آخر آبجکت
+};
 
 export const translations: Translations = {
   // Navigation
