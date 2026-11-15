@@ -108,32 +108,22 @@ export const powerMixTranslations: Dict = {
   pmResetDefaults: { fa: 'بازگشت به پیش‌فرض عمومی', en: 'Back to global defaults' },
   pmPersonalActive: { fa: 'تنظیمات شخصی فعال است', en: 'Personal settings active' },
   pmGlobalActive: { fa: 'پیش‌فرض عمومی', en: 'Global defaults' },
-    pmMixModeLocked: { fa: 'آمار پایان‌روز (قفل بعد از آمریکا)', en: 'End-of-day stats (locks after US)' },
+  pmMixModeLocked: { fa: 'آمار پایان‌روز (قفل بعد از آمریکا)', en: 'End-of-day stats (locks after US)' },
   pmMixModeExecutable: { fa: 'آمار لحظهٔ سیگنال (قابل‌اجرا)', en: 'At-signal stats (executable)' },
   pmMixModeHintLocked: {
-    fa: 'کلاس روز بعد از بسته شدن بازهٔ آمریکا قفل می‌شود؛ برای سیگنال‌های زودتر، از حرکت کامل روز استفاده شده است.',
-    en: "Day class locks after the US window; earlier signals use the full day's move.",
+    fa: 'روز معاملاتی از ۰۳:۳۰ تهران تا ۰۳:۳۰ بعدی است. کلاس روز بعد از بسته‌شدن بازهٔ آمریکا قفل می‌شود و سیگنال‌های زودتر با دانستن کل روز دسته‌بندی می‌شوند (مرجع مقایسه؛ قابل معامله نیست). سیگنال‌های ساعت مرده همان لحظه دسته‌بندی می‌شوند.',
+    en: "The trading day runs 03:30 Tehran to 03:30. The class locks after the US window and earlier signals are classified with hindsight (a reference, not tradable). Dead-hours signals are classified at signal time.",
   },
   pmMixModeHintExecutable: {
-    fa: 'فقط با داده‌ای که تا لحظهٔ صدور سیگنال معلوم بوده تصمیم گرفته می‌شود — مناسب برای ارزیابی لبهٔ واقعی ترید.',
-    en: 'Uses only information known at signal time — suitable for measuring a tradable edge.',
+    fa: 'فقط با کندل‌های بسته‌شدهٔ تا لحظهٔ صدور سیگنال دسته‌بندی می‌شود و بعد از آن هرگز تغییر نمی‌کند. آمار هر روز ساعت ۰۳:۳۰ تهران ریست می‌شود — مناسب برای ارزیابی لبهٔ واقعی ترید.',
+    en: 'Uses only candles closed by signal time and never changes afterwards. The day resets at 03:30 Tehran — suitable for measuring a tradable edge.',
   },
-    pmTimeRange: { fa: 'بازهٔ زمانی', en: 'Time range' },
+  pmTimeRange: { fa: 'بازهٔ زمانی', en: 'Time range' },
   pmRange1d: { fa: '۱ روز', en: '1 day' },
   pmRange7d: { fa: '۱ هفته', en: '1 week' },
   pmRange30d: { fa: '۱ ماه', en: '1 month' },
   pmRange90d: { fa: '۳ ماه', en: '3 months' },
   pmRangeAll: { fa: 'همه', en: 'All time' },
 
-  pmMixModeLocked: { fa: 'آمار پایان‌روز (قفل بعد از آمریکا)', en: 'End-of-day stats (locks after US)' },
-  pmMixModeExecutable: { fa: 'آمار لحظهٔ سیگنال (قابل‌اجرا)', en: 'At-signal stats (executable)' },
-  pmMixModeHintLocked: {
-    fa: 'کلاس روز بعد از بسته شدن بازهٔ آمریکا قفل می‌شود؛ برای سیگنال‌های زودتر، از حرکت کامل روز استفاده شده است.',
-    en: "Day class locks after the US window; earlier signals use the full day's move.",
-  },
-  pmMixModeHintExecutable: {
-    fa: 'فقط با داده‌ای که تا لحظهٔ صدور سیگنال معلوم بوده تصمیم گرفته می‌شود — مناسب برای ارزیابی لبهٔ واقعی ترید.',
-    en: 'Uses only information known at signal time — suitable for measuring a tradable edge.',
-  },
   pmInvalid: { fa: 'بازه‌ها معتبر نیستند (لندن باید قبل از آمریکا تمام شود و ساعت‌ها ترتیب درست داشته باشند).', en: 'The windows are not valid (London must end before US starts and times must be in order).' },
 };
