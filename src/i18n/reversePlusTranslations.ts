@@ -69,7 +69,7 @@ export const reversePlusTranslations: Dict = {
   rpEstimateNote: { fa: 'قیمت لیکوییدیشن تخمینی است و قیمت قطعی صرافی نیست.', en: 'The liquidation price is an estimate, not the exchange’s exact price.' },
 
   // ---- detail page -------------------------------------------------------------------------------
-  rpBack: { fa: 'بازگشت به سیگنال معکوس پلاس', en: 'Back to Reverse Signal Plus' },
+  rpBack: { fa: 'بازگشت', en: 'Back to Reverse Signal Plus' },
   rpNotFound: { fa: 'سیگنال پیدا نشد.', en: 'Signal not found.' },
   rpError: { fa: 'خطا در بارگذاری', en: 'Loading error' },
   rpSymbol: { fa: 'نماد', en: 'Symbol' },
