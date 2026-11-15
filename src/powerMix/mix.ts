@@ -2,6 +2,10 @@
 //
 // Every Signal Lab trade has exactly ONE mirrored Reverse Lab trade (1:1), so a signal is a PAIR. The smart mix keeps, per signal,
 // the side that the day class of ITS generation time selects. Nothing here changes how signals are generated or resolved.
+//
+// MixMode:
+//   locked      — day class after US window closes (may use end-of-day knowledge for earlier signals)
+//   executable  — day class using only data known at signal time
 import type { SignalOutcome } from '@/services/outcomeService';
 import type { ReverseOutcome } from '@/services/reverseOutcomeService';
 import type { DayClass, PowerMixConfig, SidePick } from './config';
@@ -12,11 +16,15 @@ export interface MixPair { reverse: ReverseOutcome; original: SignalOutcome }
 export interface MixRow extends MixPair {
   id: string;
   signalMs: number;
+  /** end-of-day / locked classification (may be PENDING while the day is open) */
   day: SignalDayInfo;
+  /** classification using only info available at signalMs — always FINAL or NO_DATA, never PENDING */
+  dayExec: SignalDayInfo;
 }
 
 export type DayFilter = 'ALL' | DayClass | 'DEAD' | 'PENDING';
 export type MixView = 'MIX' | 'ORIGINAL' | 'REVERSE';
+export type MixMode = 'locked' | 'executable';
 export type Side = 'original' | 'reverse';
 
 /** The moment the signal was generated: its candle close, falling back to the registration time. */
@@ -29,9 +37,19 @@ export function buildMixRows(pairs: MixPair[], analyzer: DayAnalyzer): MixRow[] 
   for (const p of pairs) {
     const ms = signalTimeMs(p.original);
     if (!Number.isFinite(ms)) continue;
-    out.push({ ...p, id: p.reverse.id, signalMs: ms, day: analyzer.classify(ms) });
+    out.push({
+      ...p,
+      id: p.reverse.id,
+      signalMs: ms,
+      day: analyzer.classifyLocked(ms),
+      dayExec: analyzer.classifyExecutable(ms),
+    });
   }
   return out;
+}
+
+export function dayOf(row: MixRow, mode: MixMode): SignalDayInfo {
+  return mode === 'executable' ? row.dayExec : row.day;
 }
 
 /** Side chosen by the day class; the "verification" switch flips original <-> reverse. Pending / no-data days pick nothing. */
@@ -42,12 +60,13 @@ export function pickSide(day: SignalDayInfo, cfg: PowerMixConfig, invert: boolea
   return p === 'original' ? 'reverse' : p === 'reverse' ? 'original' : 'none';
 }
 
-export function matchesDayFilter(row: MixRow, f: DayFilter): boolean {
+export function matchesDayFilter(row: MixRow, f: DayFilter, mode: MixMode = 'locked'): boolean {
+  const d = dayOf(row, mode);
   switch (f) {
     case 'ALL': return true;
-    case 'DEAD': return row.day.deadHours;
-    case 'PENDING': return row.day.state !== 'FINAL';
-    default: return row.day.state === 'FINAL' && row.day.dayClass === f;
+    case 'DEAD': return d.deadHours;
+    case 'PENDING': return d.state !== 'FINAL';
+    default: return d.state === 'FINAL' && d.dayClass === f;
   }
 }
 
@@ -64,26 +83,40 @@ export interface MixViews {
   excluded: { pending: number; noData: number; none: number };
 }
 
-export function buildViews(rows: MixRow[], cfg: PowerMixConfig, invert: boolean): MixViews {
+export function buildViews(rows: MixRow[], cfg: PowerMixConfig, invert: boolean, mode: MixMode = 'locked'): MixViews {
   const v: MixViews = { original: [], reverse: [], mix: [], excluded: { pending: 0, noData: 0, none: 0 } };
   for (const r of rows) {
     v.original.push(r.original);
     v.reverse.push(r.reverse);
-    const p = pickSide(r.day, cfg, invert);
+    const day = dayOf(r, mode);
+    const p = pickSide(day, cfg, invert);
     if (p === 'original') v.mix.push(r.original);
     else if (p === 'reverse') v.mix.push(r.reverse);
-    else if (r.day.state === 'PENDING') v.excluded.pending++;
-    else if (r.day.state === 'NO_DATA') v.excluded.noData++;
+    else if (day.state === 'PENDING') v.excluded.pending++;
+    else if (day.state === 'NO_DATA') v.excluded.noData++;
     else v.excluded.none++;
   }
   return v;
 }
 
 /** Which side a row shows for the chosen view. Pending rows have no pick: they show the original so the card is never empty. */
-export function displaySide(row: MixRow, view: MixView, cfg: PowerMixConfig, invert: boolean): Side | null {
+export function displaySide(row: MixRow, view: MixView, cfg: PowerMixConfig, invert: boolean, mode: MixMode = 'locked'): Side | null {
   if (view === 'ORIGINAL') return 'original';
   if (view === 'REVERSE') return 'reverse';
-  const p = pickSide(row.day, cfg, invert);
+  const day = dayOf(row, mode);
+  const p = pickSide(day, cfg, invert);
   if (p !== 'none') return p;
-  return row.day.state === 'FINAL' ? null : 'original'; // class selects nothing -> hidden; pending / no data -> listed, clearly labelled
+  return day.state === 'FINAL' ? null : 'original'; // class selects nothing -> hidden; pending / no data -> listed, clearly labelled
 }
+۳) ترجمه‌ها — فقط این کلیدها را به src/i18n/powerMixTranslations.ts اضافه کن
+ts
+  pmMixModeLocked: { fa: 'آمار پایان‌روز (قفل بعد از آمریکا)', en: 'End-of-day stats (locks after US)' },
+  pmMixModeExecutable: { fa: 'آمار لحظهٔ سیگنال (قابل‌اجرا)', en: 'At-signal stats (executable)' },
+  pmMixModeHintLocked: {
+    fa: 'کلاس روز بعد از بسته شدن بازهٔ آمریکا قفل می‌شود؛ برای سیگنال‌های زودتر، از حرکت کامل روز استفاده شده است.',
+    en: "Day class locks after the US window; earlier signals use the full day's move.",
+  },
+  pmMixModeHintExecutable: {
+    fa: 'فقط با داده‌ای که تا لحظهٔ صدور سیگنال معلوم بوده تصمیم گرفته می‌شود — مناسب برای ارزیابی لبهٔ واقعی ترید.',
+    en: 'Uses only information known at signal time — suitable for measuring a tradable edge.',
+  },
