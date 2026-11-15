@@ -11,14 +11,6 @@ export interface Translations {
 export const translations: Translations = {
   // Navigation
   dashboard: { fa: 'داشبورد', en: 'Dashboard' },
-  // ...
-  originalPlus: { fa: 'اصلی پلاس', en: 'Original Plus' },
-  // ... بقیه کلیدها مثل قبل تا آخر آبجکت
-};
-
-export const translations: Translations = {
-  // Navigation
-  dashboard: { fa: 'داشبورد', en: 'Dashboard' },
   scanner: { fa: 'اسکنر', en: 'Scanner' },
   market: { fa: 'بازار', en: 'Market' },
   assets: { fa: 'دارایی‌ها', en: 'Assets' },
@@ -30,7 +22,6 @@ export const translations: Translations = {
   settings: { fa: 'تنظیمات', en: 'Settings' },
   profile: { fa: 'پروفایل', en: 'Profile' },
   originalPlus: { fa: 'اصلی پلاس', en: 'Original Plus' },
-
 
   // Auth
   login: { fa: 'ورود', en: 'Login' },
@@ -421,6 +412,11 @@ for (const [k, v] of Object.entries(reversePlusTranslations)) {
 
 // Power Mix Lab (additive keys, prefix "pm" + "powerMix"; no existing key is overwritten)
 for (const [k, v] of Object.entries(powerMixTranslations)) {
+  if (!(k in translations)) translations[k] = v;
+}
+
+// Original Plus (additive keys, prefix "op" + "originalPlus")
+for (const [k, v] of Object.entries(originalPlusTranslations)) {
   if (!(k in translations)) translations[k] = v;
 }
 
