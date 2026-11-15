@@ -8,18 +8,17 @@
 //   Power       : exactly one of the two windows reaches the threshold
 //   Neutral     : neither reaches it
 //
-// Day boundary for POWER / "move since day start":
-//   crypto day = 00:00 UTC = 03:30 Tehran (common exchange daily candle open).
-//
-// London / US / dead-hours still use Tehran WALL CLOCK (minutes since 00:00 Tehran calendar).
-// So config values like london 11:30 stay at 11:30 Tehran — they do not shift when the power-day resets at 03:30.
+// THE DAY: one trading day = one crypto day = 03:30 Tehran -> 03:30 Tehran (00:00 UTC -> 00:00 UTC). The statistics reset at 03:30 Tehran.
+//   * London / US windows and dead hours are Tehran wall-clock minutes of the Tehran date on which that crypto day opened.
+//     A signal at 01:00 Tehran therefore belongs to the PREVIOUS crypto day (minutes = 25:00) and is a late / dead-hours signal.
+//   * "move since day start" is measured from the crypto-day open (03:30 Tehran).
 //
 // Two classification modes for a signal at time T:
 //   * locked      — waits until the US window is closed (relative to "now"), then uses the full calendar windows.
 //   * executable  — uses ONLY information available at T. Never waits for the future.
 import {
   DAY_MS, MINUTE_MS, roundToSecond,
-  tehranDayStart, cryptoDayStart, cryptoDayKey,
+  cryptoDayStart, cryptoDayKey, cryptoCalendarStart,
 } from './tehranTime';
 import type { DayClass, PowerMixConfig, SidePick } from './config';
 
@@ -110,6 +109,8 @@ export function createDayAnalyzer(candles: BtcCandle[], cfg: PowerMixConfig, now
     let last: BtcCandle | null = null;
     const first = idx.get(startMs) ?? null;
     for (let t = startMs; t < endMs && t < asOfMs; t += STEP_MS) {
+      // a candle still forming at a PAST moment carries its future close -> never use it. (At "now" the forming candle is the live price.)
+      if (t + STEP_MS > asOfMs && asOfMs < nowMs) break;
       const c = idx.get(t);
       if (!c) { missing = true; continue; }
       volume += c.volume || 0;
@@ -124,7 +125,7 @@ export function createDayAnalyzer(candles: BtcCandle[], cfg: PowerMixConfig, now
 
   /**
    * London / US windows are Tehran WALL CLOCK times in config (minutes since 00:00 Tehran).
-   * `calDayStart` must be tehranDayStart(...), never cryptoDayStart.
+   * `calDayStart` must be cryptoCalendarStart(...): 00:00 Tehran of the date on which the signal's crypto day opened.
    */
   const dayWindows = (calDayStart: number, asOfMs: number) => ({
     london: windowStats(calDayStart + cfg.london.start * MINUTE_MS, calDayStart + cfg.london.end * MINUTE_MS, asOfMs),
@@ -132,11 +133,14 @@ export function createDayAnalyzer(candles: BtcCandle[], cfg: PowerMixConfig, now
   });
 
   /**
-   * Price at moment `ms`, looking at 30m candles whose open is before `ms`.
-   * `anchorStart` limits how far back we search (crypto day open or calendar midnight).
+   * Last price KNOWN at moment `ms`: the close of the last 30m candle that had already CLOSED by `ms`.
+   * (Using the candle that contains `ms` would leak up to 30 minutes of the future into the class.)
+   * Exception: at "now" the forming candle is the live price. `anchorStart` limits how far back we search.
    */
   const priceAt = (anchorStart: number, ms: number): number | null => {
-    let t = Math.floor((Math.min(ms, nowMs) - 1) / STEP_MS) * STEP_MS;
+    const at = Math.min(ms, nowMs);
+    const base = Math.floor(at / STEP_MS) * STEP_MS;
+    let t = at >= nowMs ? base : base - STEP_MS;
     for (let i = 0; i < 12 && t >= anchorStart; i++, t -= STEP_MS) {
       const c = idx.get(t);
       if (c) return c.close;
@@ -144,11 +148,13 @@ export function createDayAnalyzer(candles: BtcCandle[], cfg: PowerMixConfig, now
     return null;
   };
 
-  /** Net move from crypto-day open (03:30 Tehran / 00:00 UTC) to `ms`. */
+  /** Net move from the crypto-day open (03:30 Tehran / 00:00 UTC) to `ms`. In the first 30 minutes of the day nothing has closed yet -> 0. */
   const dayMovePct = (cryptoStart: number, ms: number): number | null => {
     const open = idx.get(cryptoStart)?.open;
+    if (!open || !(open > 0)) return null;
     const p = priceAt(cryptoStart, ms);
-    return open && open > 0 && p !== null ? ((p - open) / open) * 100 : null;
+    if (p !== null) return ((p - open) / open) * 100;
+    return ms - cryptoStart < STEP_MS ? 0 : null;
   };
 
   const volumeBaseline = (calDayStart: number): number | null => {
@@ -171,7 +177,10 @@ export function createDayAnalyzer(candles: BtcCandle[], cfg: PowerMixConfig, now
     return base !== null && base > 0 && w.london.volume + w.us.volume < base * cfg.lowVolumeRatio;
   };
 
-  /** `tod` = minutes since 00:00 Tehran (wall clock). */
+  /**
+   * `tod` = Tehran wall-clock minutes counted from 00:00 of the date the crypto day opened: 210 (03:30) ... 1650 (27:30).
+   * Everything from 24:00 to 27:30 (00:00-03:30 Tehran) is the tail of the previous day and is always >= lateStart -> dead.
+   */
   const isDead = (tod: number) => (tod >= cfg.dead.start && tod < cfg.dead.end) || tod >= cfg.dead.lateStart;
 
   function classifyDeadOrNoData(
@@ -197,7 +206,7 @@ export function createDayAnalyzer(candles: BtcCandle[], cfg: PowerMixConfig, now
   function classifyLocked(signalMs: number): SignalDayInfo {
     const T = roundToSecond(signalMs);
     const cryptoStart = cryptoDayStart(T);
-    const calDayStart = tehranDayStart(T);
+    const calDayStart = cryptoCalendarStart(T);
     const tod = (T - calDayStart) / MINUTE_MS;
     const dead = isDead(tod);
     const w = dayWindows(calDayStart, nowMs);
@@ -247,7 +256,7 @@ export function createDayAnalyzer(candles: BtcCandle[], cfg: PowerMixConfig, now
     const T = roundToSecond(signalMs);
     const asOf = Math.min(T, nowMs);
     const cryptoStart = cryptoDayStart(T);
-    const calDayStart = tehranDayStart(T);
+    const calDayStart = cryptoCalendarStart(T);
     const tod = (T - calDayStart) / MINUTE_MS;
     const dead = isDead(tod);
     const w = dayWindows(calDayStart, asOf);
@@ -262,26 +271,16 @@ export function createDayAnalyzer(candles: BtcCandle[], cfg: PowerMixConfig, now
 
     if (dead) return classifyDeadOrNoData(base, cryptoStart, T);
 
+    // a window that is already closed at T but has a gap in its candles can never be guessed -> NO_DATA (same rule as locked mode)
+    if (w.london.missing || w.us.missing) {
+      return { ...base, state: 'NO_DATA', dayClass: null, dayMovePct: null, tendency: null };
+    }
+
     const londonDone = w.london.complete ? w.london.movePct : null;
     const usDone = w.us.complete ? w.us.movePct : null;
 
-    if (w.london.complete && w.us.complete) {
-      if (w.london.missing || w.us.missing) {
-        return { ...base, state: 'NO_DATA', dayClass: null, dayMovePct: null, tendency: null };
-      }
-      return {
-        ...base,
-        state: 'FINAL',
-        dayClass: classifyWindows(londonDone, usDone, cfg.thresholdPct),
-        dayMovePct: dayMovePct(cryptoStart, T),
-        tendency: null,
-      };
-    }
-
+    // at least one window is closed at T: classify with what is closed (US still open / not started -> only London counts)
     if (w.london.complete || w.us.complete) {
-      if ((w.london.complete && w.london.missing) || (w.us.complete && w.us.missing)) {
-        return { ...base, state: 'NO_DATA', dayClass: null, dayMovePct: null, tendency: null };
-      }
       return {
         ...base,
         state: 'FINAL',
@@ -291,6 +290,7 @@ export function createDayAnalyzer(candles: BtcCandle[], cfg: PowerMixConfig, now
       };
     }
 
+    // no window closed yet: only the move since the crypto-day open is known
     return classifyDeadOrNoData(base, cryptoStart, T);
   }
 
@@ -301,7 +301,7 @@ export function createDayAnalyzer(candles: BtcCandle[], cfg: PowerMixConfig, now
   function live(): LiveStatus {
     const infoExec = classifyExecutable(nowMs);
     const infoLocked = classifyLocked(nowMs);
-    const calDayStart = tehranDayStart(nowMs);
+    const calDayStart = cryptoCalendarStart(nowMs);
     const w = dayWindows(calDayStart, nowMs);
 
     let price: number | null = null;
