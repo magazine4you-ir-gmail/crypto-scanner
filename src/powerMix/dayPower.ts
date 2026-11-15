@@ -176,8 +176,13 @@ export function createDayAnalyzer(candles: BtcCandle[], cfg: PowerMixConfig, now
    */
   function classifyLocked(signalMs: number): SignalDayInfo {
     const T = roundToSecond(signalMs);
-    const dayStart = tehranDayStart(T);
-    const tod = (T - dayStart) / MINUTE_MS;
+
+// مبدأ قدرت روز / حرکت روز = 03:30 تهران
+const dayStart = cryptoDayStart(T);
+
+// ساعت روی دیوار تهران برای لندن/آمریکا/مرده (00:00 تقویم تهران)
+const calDayStart = tehranDayStart(T);
+const tod = (T - calDayStart) / MINUTE_MS; // همان 0..1440 قبلی
     const dead = isDead(tod);
     const w = dayWindows(dayStart, nowMs);
     const base = {
