@@ -426,3 +426,7 @@ export function t(key: string, lang: Lang): string {
   if (!entry) return key;
   return entry[lang] ?? entry.en ?? key;
 }
+// Original Plus (additive keys, prefix "op" / "originalPlus")
+for (const [k, v] of Object.entries(originalPlusTranslations)) {
+  if (!(k in translations)) translations[k] = v;
+}
