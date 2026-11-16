@@ -18,4 +18,30 @@ export const originalPlusTranslations: Dict = {
     en: 'Counts come straight from the original signal outcomes (the same source as Signal Lab).',
   },
   opBack: { fa: 'بازگشت به اصلی پلاس', en: 'Back to Original Plus' },
+    opBack: { fa: 'بازگشت به اصلی پلاس', en: 'Back to Original Plus' },
+
+  // وضعیت روی صفحهٔ جزئیات سیگنال اصلی
+  opBannerOPEN: {
+    fa: 'این سیگنال اصلی هنوز باز است.',
+    en: 'This original signal is still open.',
+  },
+  opBannerWIN: {
+    fa: 'این سیگنال اصلی بسته شد و با سود تمام شد.',
+    en: 'This original signal closed with a profit.',
+  },
+  opBannerLOSS: {
+    fa: 'این سیگنال اصلی بسته شد و با زیان تمام شد.',
+    en: 'This original signal closed with a loss.',
+  },
+  opBannerEXPIRED: {
+    fa: 'این سیگنال اصلی بدون رسیدن به حد سود یا حد ضرر منقضی شد.',
+    en: 'This original signal expired without reaching the target or the stop.',
+  },
+  opBannerCANCELLED: {
+    fa: 'این سیگنال اصلی لغو شد.',
+    en: 'This original signal was cancelled.',
+  },
+
+  // در صورت نیاز برای جهت (بدون کلمهٔ معکوس)
+  opDirection: { fa: 'جهت', en: 'Direction' },
 };
