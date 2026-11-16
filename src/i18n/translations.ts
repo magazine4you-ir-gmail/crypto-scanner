@@ -1,6 +1,7 @@
 import { reversePlusTranslations } from './reversePlusTranslations';
 import { powerMixTranslations } from './powerMixTranslations';
 import { originalPlusTranslations } from './originalPlusTranslations';
+import { originalPlusTranslations } from './originalPlusTranslations';
 
 export type Lang = 'fa' | 'en';
 
