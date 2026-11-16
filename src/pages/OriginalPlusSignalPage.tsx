@@ -34,6 +34,48 @@ function asReverseShape(o: SignalOutcome): ReverseOutcome {
   } as ReverseOutcome;
 }
 
+/**
+ * Local entry-quality score for Original Plus (no central reverse_plus_evaluations).
+ * Uses geometry (R/R), distance of live price to entry, and engine score — same “loop” idea as Reverse Plus timing.
+ */
+function localEntryQuality(args: {
+  entry: number;
+  stop: number;
+  target: number;
+  price: number | null;
+  rrNet: number | null;
+  score: number | null;
+}): number | null {
+  const { entry, stop, target, price, rrNet, score } = args;
+  if (!Number.isFinite(entry) || !Number.isFinite(stop) || !Number.isFinite(target)) return null;
+  const risk = Math.abs(entry - stop);
+  if (risk <= 0) return null;
+
+  let q = 50;
+
+  if (rrNet != null && Number.isFinite(rrNet)) {
+    if (rrNet >= 2) q += 25;
+    else if (rrNet >= 1.5) q += 18;
+    else if (rrNet >= 1) q += 10;
+    else if (rrNet >= 0.7) q += 0;
+    else q -= 15;
+  }
+
+  if (price != null && price > 0) {
+    const distPct = (Math.abs(entry - price) / price) * 100;
+    if (distPct <= 0.15) q += 20;
+    else if (distPct <= 0.4) q += 10;
+    else if (distPct <= 1) q += 0;
+    else q -= 10;
+  }
+
+  if (score != null && Number.isFinite(score)) {
+    q += (score - 50) * 0.3;
+  }
+
+  return Math.max(0, Math.min(100, Math.round(q)));
+}
+
 const GUIDE_STATES = new Set(['WAITING_FOR_ENTRY', 'ENTRY_ALLOWED', 'POSITION_OPEN', 'APPROACHING_TP', 'APPROACHING_SL']);
 const GUIDE_TONE: Record<string, string> = {
   ENTRY_ALLOWED: 'bg-success-500/10 border-success-500/30 text-success-400',
@@ -184,6 +226,19 @@ export function OriginalPlusSignalPage() {
     });
   }, [rev, mode, replay, bt, histo, lastPrice, target, stop, cfg]);
 
+  const qualityPct = useMemo(() => {
+    if (!rev || entryLevel === null || stop === null || target === null) return null;
+    const livePrice = rev.status === 'OPEN' ? (lastPrice ?? summary?.price ?? null) : null;
+    return localEntryQuality({
+      entry: entryLevel,
+      stop,
+      target,
+      price: livePrice,
+      rrNet: summary?.rrNet ?? null,
+      score: typeof rev.score === 'number' ? rev.score : null,
+    });
+  }, [rev, entryLevel, stop, target, lastPrice, summary]);
+
   if (loading) return <LoadingSpinner />;
   if (error || !rev) return <ErrorState message={error ?? t('rpError')} onRetry={() => void load()} />;
 
@@ -195,6 +250,25 @@ export function OriginalPlusSignalPage() {
   const outLabel = (o: string) => { const k = `rpOut${o}`; return t(k) === k ? '—' : t(k); };
   const stateLabel = (s: string) => { const k = `rpSim${s}`; return t(k) === k ? '—' : t(k); };
   const guide = rev.status === 'OPEN' && inst && GUIDE_STATES.has(inst.state) ? inst : null;
+
+  // Banner: prefer opBanner*; fall back so UI never shows raw key if translations not merged yet
+  const bannerKey = `opBanner${rev.status}`;
+  const bannerText = t(bannerKey) === bannerKey
+    ? (rev.status === 'OPEN'
+      ? (lang === 'fa' ? 'این سیگنال اصلی هنوز باز است.' : 'This original signal is still open.')
+      : rev.status === 'WIN'
+        ? (lang === 'fa' ? 'این سیگنال اصلی بسته شد و با سود تمام شد.' : 'This original signal closed with a profit.')
+        : rev.status === 'LOSS'
+          ? (lang === 'fa' ? 'این سیگنال اصلی بسته شد و با زیان تمام شد.' : 'This original signal closed with a loss.')
+          : rev.status === 'EXPIRED'
+            ? (lang === 'fa' ? 'این سیگنال اصلی بدون رسیدن به حد سود یا حد ضرر منقضی شد.' : 'This original signal expired without reaching the target or the stop.')
+            : (lang === 'fa' ? 'این سیگنال اصلی لغو شد.' : 'This original signal was cancelled.'))
+    : t(bannerKey);
+
+  const directionLabel = (() => {
+    const k = 'opDirection';
+    return t(k) === k ? (lang === 'fa' ? 'جهت' : 'Direction') : t(k);
+  })();
 
   const lines: ChartLine[] = [];
   const zl = rev.entry_low ?? null;
@@ -232,7 +306,13 @@ export function OriginalPlusSignalPage() {
     <div className="space-y-5">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <button className="text-xs text-primary-400 flex items-center gap-1 mb-2" onClick={() => navigate('/power-mix')}><ArrowRight className="w-3 h-3" />{t('rpBack')}</button>
+          <button
+            className="text-xs text-primary-400 flex items-center gap-1 mb-2"
+            onClick={() => navigate('/original-plus')}
+          >
+            <ArrowRight className="w-3 h-3" />
+            {t('opBack') === 'opBack' ? (lang === 'fa' ? 'بازگشت به اصلی پلاس' : 'Back to Original Plus') : t('opBack')}
+          </button>
           <h1 className="text-xl font-bold text-slate-100 flex items-center gap-2 flex-wrap">
             {rev.symbol}
             <Chip tone={isBuy ? 'bg-success-500/20 text-success-400' : 'bg-error-500/20 text-error-400'}>{sideLabel}</Chip>
@@ -246,14 +326,14 @@ export function OriginalPlusSignalPage() {
 
       <div className={`p-3 rounded-lg border ${BANNER_TONE[rev.status] ?? ''}`}>
         <p className="text-sm font-semibold">{t(`rpSt${rev.status}`)}</p>
-        <p className="text-sm leading-relaxed mt-0.5">{t(`rpBanner${rev.status}`)}</p>
+        <p className="text-sm leading-relaxed mt-0.5">{bannerText}</p>
         {guide && <p className={`text-sm leading-relaxed mt-2 pt-2 border-t border-current/20 ${GUIDE_TONE[guide.state]?.split(' ').pop() ?? ''}`}>{guide.text[lang]}</p>}
       </div>
 
       <Card className="!p-4">
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
           <Metric label={t('rpSymbol')} value={rev.symbol} />
-          <Metric label={t('rpDirection')} value={sideLabel} />
+          <Metric label={directionLabel} value={sideLabel} />
           <TimeStamp value={rev.signal_at} label={t('rpSignalTime')} />
           <Metric label={t('rpSignalPrice')} value={p(rev.price_at_signal)} />
           <Metric label={t('rpRecommended')} value={p(entryLevel)} tone="text-primary-300" />
@@ -266,6 +346,19 @@ export function OriginalPlusSignalPage() {
           <Metric label={t('rpSelectedLeverage')} value={`${lev}x`} tone="text-warning-400" />
           <Metric label={rev.status === 'OPEN' ? t('rpCurrentPrice') : t('rpExitPrice')} value={p(rev.status === 'OPEN' ? (lastPrice ?? summary?.price) : rev.exit_price)} />
           <Metric label={t('score')} value={formatNumber(rev.score, lang, 0)} />
+          <Metric
+            label={t('rpQuality')}
+            value={qualityPct == null ? '—' : `${formatNumber(qualityPct, lang, 0)}٪`}
+            tone={
+              qualityPct == null
+                ? undefined
+                : qualityPct >= 65
+                  ? 'text-success-400'
+                  : qualityPct >= 50
+                    ? 'text-warning-400'
+                    : 'text-slate-300'
+            }
+          />
         </div>
         <p className="text-[11px] text-slate-500 mt-3">{t('rpRrBasis')}</p>
       </Card>
