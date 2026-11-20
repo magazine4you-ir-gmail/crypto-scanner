@@ -6,6 +6,8 @@ import { configFromRow, DEFAULT_POWER_MIX_CONFIG, type PowerMixConfig } from '@/
 import { STEP_MS, type BtcCandle } from '@/powerMix/dayPower';
 import { DAY_MS, tehranDayStart } from '@/powerMix/tehranTime';
 import type { MixPair } from '@/powerMix/mix';
+import type { PlusBacktest } from './reversePlusService';
+import { BACKTEST_ENGINE_VERSION } from '../../supabase/functions/_shared/reversePlus/index';
 
 /**
  * Power Mix client service — READ-ONLY. It writes nothing and creates no signals.
@@ -21,9 +23,15 @@ const MAX_LOOKBACK_DAYS = 200;
 
 const SELECT = '*, origin:signal_outcomes!origin_outcome_id(*)';
 
+/** Hard ceiling of the history the page loads (the page says so when it is reached instead of silently cutting the history). */
+export const MAX_MIX_ROWS = 5000;
+
+export interface MixPairsResult { pairs: MixPair[]; /** true when more signals exist than were loaded */ truncated: boolean }
+
 /** Newest first. A pair needs a readable, non-cancelled original; anything else cannot be scored and is skipped. */
-export async function fetchMixPairs(maxRows = 1000): Promise<MixPair[]> {
+export async function fetchMixPairs(maxRows = MAX_MIX_ROWS): Promise<MixPairsResult> {
   const out: MixPair[] = [];
+  let truncated = false;
   for (let from = 0; from < maxRows; from += PAGE) {
     const { data, error } = await supabase
       .from('reverse_signal_outcomes')
@@ -41,6 +49,30 @@ export async function fetchMixPairs(maxRows = 1000): Promise<MixPair[]> {
       out.push({ reverse, original });
     }
     if ((data?.length ?? 0) < PAGE) break;
+    if (from + PAGE >= maxRows) truncated = true;
+  }
+  return { pairs: out, truncated };
+}
+
+/**
+ * Central Reverse Plus backtests (the "optimised" reverse result) of many signals, read-only.
+ * Missing rows are normal (not evaluated yet) — those signals fall back to their Reverse Lab result.
+ */
+export async function fetchBacktestsForIds(ids: string[]): Promise<Map<string, PlusBacktest>> {
+  const out = new Map<string, PlusBacktest>();
+  const chunks: string[][] = [];
+  for (let i = 0; i < ids.length; i += 100) chunks.push(ids.slice(i, i + 100));
+  for (let i = 0; i < chunks.length; i += 4) {
+    const res = await Promise.all(chunks.slice(i, i + 4).map((chunk) =>
+      supabase.from('reverse_plus_backtests').select('*').in('reverse_outcome_id', chunk)));
+    for (const { data, error } of res) {
+      if (error) throw new Error(error.message);
+      for (const row of (data ?? []) as PlusBacktest[]) {
+        const prev = out.get(row.reverse_outcome_id);
+        // one row per signal: prefer the current engine version if several exist
+        if (!prev || (row.engine_version === BACKTEST_ENGINE_VERSION && prev.engine_version !== BACKTEST_ENGINE_VERSION)) out.set(row.reverse_outcome_id, row);
+      }
+    }
   }
   return out;
 }
