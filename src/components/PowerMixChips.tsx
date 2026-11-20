@@ -5,6 +5,7 @@ import type { SignalDayInfo } from '@/powerMix/dayPower';
 
 const CLASS_TONE: Record<DayClass, string> = {
   VERY_STRONG: 'bg-success-500/20 text-success-400',
+  STRONG: 'bg-success-500/10 text-success-400',
   POWER: 'bg-primary-500/20 text-primary-300',
   MIXED: 'bg-warning-500/20 text-warning-400',
   NEUTRAL: 'bg-surface-200 text-slate-300',
