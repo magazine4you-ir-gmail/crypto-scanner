@@ -3,7 +3,7 @@ import { ChevronDown, ChevronUp, SlidersHorizontal } from 'lucide-react';
 import { Card } from '@/components/UI';
 import { Chip } from '@/components/Responsive';
 import { useSettings } from '@/contexts/SettingsContext';
-import { DAY_CLASSES, isValidConfig, type DayClass, type PowerMixConfig, type SidePick } from '@/powerMix/config';
+import { DAY_CLASSES, isValidConfig, type DayClass, type DeadPick, type PowerMixConfig, type SidePick } from '@/powerMix/config';
 import { formatHHMM } from '@/powerMix/tehranTime';
 
 interface Props {
@@ -30,19 +30,23 @@ export function PowerMixSettingsPanel({ value, personal, onSave, onReset }: Prop
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState<PowerMixConfig>(value);
   const [thr, setThr] = useState(String(value.thresholdPct));
+  const [strong, setStrong] = useState(String(value.strongPct));
   const [vol, setVol] = useState(String(value.lowVolumeRatio));
 
-  useEffect(() => { setDraft(value); setThr(String(value.thresholdPct)); setVol(String(value.lowVolumeRatio)); }, [value]);
+  useEffect(() => { setDraft(value); setThr(String(value.thresholdPct)); setStrong(String(value.strongPct)); setVol(String(value.lowVolumeRatio)); }, [value]);
 
+  const num = (v: string) => (v.trim() === '' ? 0 : Number(v.replace(',', '.')));
   const candidate = useMemo<PowerMixConfig>(
-    () => ({ ...draft, thresholdPct: Number(thr.replace(',', '.')), lowVolumeRatio: Number(vol.replace(',', '.')) }),
-    [draft, thr, vol],
+    () => ({ ...draft, thresholdPct: Number(thr.replace(',', '.')), strongPct: num(strong), lowVolumeRatio: Number(vol.replace(',', '.')) }),
+    [draft, thr, strong, vol],
   );
+  const strongOn = candidate.strongPct > 0;
   const valid = isValidConfig(candidate);
 
   const setWin = (key: 'london' | 'us', part: 'start' | 'end', v: number) => setDraft((d) => ({ ...d, [key]: { ...d[key], [part]: v } }));
   const setDead = (part: 'start' | 'end' | 'lateStart', v: number) => setDraft((d) => ({ ...d, dead: { ...d.dead, [part]: v } }));
   const setSel = (c: DayClass, v: SidePick) => setDraft((d) => ({ ...d, selection: { ...d.selection, [c]: v } }));
+  const setDeadPick = (v: DeadPick) => setDraft((d) => ({ ...d, selection: { ...d.selection, DEAD: v } }));
 
   return (
     <Card className="!p-3 sm:!p-4 space-y-3">
@@ -65,10 +69,15 @@ export function PowerMixSettingsPanel({ value, personal, onSave, onReset }: Prop
               <input className="input-field text-sm" inputMode="decimal" value={thr} onChange={(e) => setThr(e.target.value)} />
             </label>
             <label className="space-y-1">
+              <span className="text-xs text-slate-400">{t('pmStrongPct')}</span>
+              <input className="input-field text-sm" inputMode="decimal" value={strong} onChange={(e) => setStrong(e.target.value)} />
+            </label>
+            <label className="space-y-1">
               <span className="text-xs text-slate-400">{t('pmLowVolRatio')}</span>
               <input className="input-field text-sm" inputMode="decimal" value={vol} onChange={(e) => setVol(e.target.value)} />
             </label>
           </div>
+          <p className="text-[11px] text-slate-500 leading-5">{t('pmStrongHint')}</p>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div className="space-y-1">
@@ -101,20 +110,35 @@ export function PowerMixSettingsPanel({ value, personal, onSave, onReset }: Prop
           <div className="space-y-2">
             <span className="text-xs text-slate-400">{t('pmSelection')}</span>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-              {DAY_CLASSES.map((c) => (
-                <div key={c} className="flex items-center justify-between gap-2 rounded-lg bg-surface-100/60 px-3 py-2">
-                  <span className="text-sm text-slate-200">{t(`pmClass${c}`)}</span>
-                  <select className="input-field text-sm !w-auto" value={draft.selection[c]} onChange={(e) => setSel(c, e.target.value as SidePick)} aria-label={t(`pmClass${c}`)}>
-                    <option value="original">{t('pmSelOriginal')}</option>
-                    <option value="reverse">{t('pmSelReverse')}</option>
-                    <option value="none">{t('pmSelNone')}</option>
-                  </select>
-                </div>
-              ))}
+              {DAY_CLASSES.map((c) => {
+                const off = c === 'STRONG' && !strongOn; // the tier does not exist while the strong threshold is 0
+                return (
+                  <div key={c} className={`flex items-center justify-between gap-2 rounded-lg bg-surface-100/60 px-3 py-2 ${off ? 'opacity-50' : ''}`}>
+                    <span className="text-sm text-slate-200">{t(`pmClass${c}`)}</span>
+                    <select className="input-field text-sm !w-auto" value={draft.selection[c]} onChange={(e) => setSel(c, e.target.value as SidePick)} aria-label={t(`pmClass${c}`)}>
+                      <option value="original">{t('pmSelOriginal')}</option>
+                      <option value="reverse">{t('pmSelReverse')}</option>
+                      <option value="none">{t('pmSelNone')}</option>
+                    </select>
+                  </div>
+                );
+              })}
+              <div className="sm:col-span-2 flex items-center justify-between gap-2 rounded-lg bg-surface-100/60 px-3 py-2">
+                <span className="min-w-0">
+                  <span className="block text-sm text-slate-200">{t('pmSelDead')}</span>
+                  <span className="block text-[11px] text-slate-500 leading-4">{t('pmSelDeadHint')}</span>
+                </span>
+                <select className="input-field text-sm !w-auto shrink-0" value={draft.selection.DEAD} onChange={(e) => setDeadPick(e.target.value as DeadPick)} aria-label={t('pmSelDead')}>
+                  <option value="byClass">{t('pmSelByClass')}</option>
+                  <option value="original">{t('pmSelOriginal')}</option>
+                  <option value="reverse">{t('pmSelReverse')}</option>
+                  <option value="none">{t('pmSelNone')}</option>
+                </select>
+              </div>
             </div>
           </div>
 
-          {!valid && <p className="text-xs text-error-400">{t('pmInvalid')}</p>}
+          {!valid && <p className="text-xs text-error-400">{t('pmInvalid')} {t('pmInvalidStrong')}</p>}
           <div className="flex flex-wrap gap-2">
             <button className="btn-primary text-sm" disabled={!valid} onClick={() => onSave(candidate)}>{t('pmSave')}</button>
             <button className="btn-secondary text-sm" onClick={onReset}>{t('pmResetDefaults')}</button>
