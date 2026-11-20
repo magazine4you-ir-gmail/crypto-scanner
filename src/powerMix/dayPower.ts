@@ -20,7 +20,7 @@ import {
   DAY_MS, MINUTE_MS, roundToSecond,
   cryptoDayStart, cryptoDayKey, cryptoCalendarStart,
 } from './tehranTime';
-import type { DayClass, PowerMixConfig, SidePick } from './config';
+import { selectionFor, type DayClass, type PowerMixConfig, type SidePick } from './config';
 
 export interface BtcCandle {
   openTime: number;
@@ -59,6 +59,20 @@ export interface SignalDayInfo {
   tendency: Tendency | null;
 }
 
+export interface DayReport {
+  dayKey: string;
+  /** UTC ms of the crypto-day open (00:00 UTC / 03:30 Tehran) */
+  dayStart: number;
+  londonPct: number | null;
+  usPct: number | null;
+  state: DayState;
+  /** only once both windows are closed */
+  dayClass: DayClass | null;
+  /** open -> close (or -> now) move of the crypto day, % */
+  dayMovePct: number | null;
+  lowVolume: boolean;
+}
+
 export interface LiveStatus {
   nowMs: number;
   info: SignalDayInfo;
@@ -80,12 +94,36 @@ export function buildIndex(candles: BtcCandle[]): Map<number, BtcCandle> {
   return m;
 }
 
-export function classifyWindows(londonPct: number | null, usPct: number | null, thresholdPct: number): DayClass {
+/**
+ * Classic model (strongPct = 0):  VERY_STRONG = both windows >= threshold, same direction · MIXED = both >= threshold, opposite ·
+ * POWER = exactly one window >= threshold · NEUTRAL = none.
+ *
+ * Strength ladder (strongPct > 0):  NEUTRAL < threshold <= POWER < strongPct <= STRONG | VERY_STRONG, where the day's magnitude is
+ * |London + US| when both sessions moved the SAME way and the larger single session otherwise.
+ *   VERY_STRONG = magnitude >= strongPct AND both sessions agree (market aligned) · STRONG = magnitude >= strongPct without that alignment.
+ *   MIXED (both sessions >= threshold, opposite directions) keeps priority: a conflicting day is never "strong".
+ */
+export function classifyWindows(londonPct: number | null, usPct: number | null, thresholdPct: number, strongPct = 0): DayClass {
   const l = londonPct !== null && Math.abs(londonPct) >= thresholdPct - EPS;
   const u = usPct !== null && Math.abs(usPct) >= thresholdPct - EPS;
-  if (l && u) return Math.sign(londonPct as number) === Math.sign(usPct as number) ? 'VERY_STRONG' : 'MIXED';
+  const both = londonPct !== null && usPct !== null && londonPct !== 0 && usPct !== 0;
+  const aligned = both && Math.sign(londonPct as number) === Math.sign(usPct as number);
+  if (l && u && !aligned) return 'MIXED';
+  if (strongPct > 0) {
+    const magnitude = aligned ? Math.abs((londonPct as number) + (usPct as number)) : Math.max(Math.abs(londonPct ?? 0), Math.abs(usPct ?? 0));
+    if (magnitude >= strongPct - EPS) return aligned ? 'VERY_STRONG' : 'STRONG';
+    return l || u ? 'POWER' : 'NEUTRAL';
+  }
+  if (l && u) return 'VERY_STRONG';
   if (l || u) return 'POWER';
   return 'NEUTRAL';
+}
+
+/** Class of a move measured from the day open only (dead hours / before any window closed). */
+export function classifyMove(movePct: number, thresholdPct: number, strongPct = 0): DayClass {
+  const a = Math.abs(movePct);
+  if (strongPct > 0 && a >= strongPct - EPS) return 'STRONG';
+  return a >= thresholdPct - EPS ? 'POWER' : 'NEUTRAL';
 }
 
 export function tendencyOf(movePct: number | null, thresholdPct: number): Tendency | null {
@@ -193,7 +231,7 @@ export function createDayAnalyzer(candles: BtcCandle[], cfg: PowerMixConfig, now
     return {
       ...base,
       state: 'FINAL',
-      dayClass: Math.abs(mv) >= cfg.thresholdPct - EPS ? 'POWER' : 'NEUTRAL',
+      dayClass: classifyMove(mv, cfg.thresholdPct, cfg.strongPct),
       dayMovePct: mv,
       tendency: null,
     };
@@ -225,7 +263,7 @@ export function createDayAnalyzer(candles: BtcCandle[], cfg: PowerMixConfig, now
       return {
         ...base,
         state: 'FINAL',
-        dayClass: classifyWindows(w.london.movePct, w.us.movePct, cfg.thresholdPct),
+        dayClass: classifyWindows(w.london.movePct, w.us.movePct, cfg.thresholdPct, cfg.strongPct),
         dayMovePct: dayMovePct(cryptoStart, T),
         tendency: null,
       };
@@ -284,7 +322,7 @@ export function createDayAnalyzer(candles: BtcCandle[], cfg: PowerMixConfig, now
       return {
         ...base,
         state: 'FINAL',
-        dayClass: classifyWindows(londonDone, usDone, cfg.thresholdPct),
+        dayClass: classifyWindows(londonDone, usDone, cfg.thresholdPct, cfg.strongPct),
         dayMovePct: dayMovePct(cryptoStart, T),
         tendency: null,
       };
@@ -292,6 +330,27 @@ export function createDayAnalyzer(candles: BtcCandle[], cfg: PowerMixConfig, now
 
     // no window closed yet: only the move since the crypto-day open is known
     return classifyDeadOrNoData(base, cryptoStart, T);
+  }
+
+  /**
+   * Whole-day record for the history table / thermometer: London + US moves of the crypto day that opened at `cryptoStart`
+   * (00:00 UTC), its locked class once both windows are closed, and the day's net move from open to close.
+   */
+  function dayReport(cryptoStart: number): DayReport {
+    const calDayStart = cryptoCalendarStart(cryptoStart);
+    const w = dayWindows(calDayStart, nowMs);
+    const complete = w.london.complete && w.us.complete;
+    const endMs = Math.min(cryptoStart + DAY_MS - 1, nowMs);
+    return {
+      dayKey: cryptoDayKey(cryptoStart),
+      dayStart: cryptoStart,
+      londonPct: w.london.movePct,
+      usPct: w.us.movePct,
+      state: w.london.missing || w.us.missing ? 'NO_DATA' : complete ? 'FINAL' : 'PENDING',
+      dayClass: complete ? classifyWindows(w.london.movePct, w.us.movePct, cfg.thresholdPct, cfg.strongPct) : null,
+      dayMovePct: dayMovePct(cryptoStart, endMs),
+      lowVolume: isLowVolume(calDayStart, nowMs),
+    };
   }
 
   function classify(signalMs: number, mode: ClassifyMode = 'locked'): SignalDayInfo {
@@ -314,11 +373,11 @@ export function createDayAnalyzer(candles: BtcCandle[], cfg: PowerMixConfig, now
     let approximate = false;
 
     if (infoExec.state === 'FINAL' && infoExec.dayClass) {
-      pick = cfg.selection[infoExec.dayClass];
+      pick = selectionFor(cfg, infoExec.dayClass, infoExec.deadHours);
       approximate = infoLocked.state === 'PENDING';
     } else if (infoLocked.state === 'PENDING' && infoLocked.tendency) {
       approximate = true;
-      pick = infoLocked.tendency === 'FLAT' ? cfg.selection.NEUTRAL : cfg.selection.POWER;
+      pick = selectionFor(cfg, infoLocked.tendency === 'FLAT' ? 'NEUTRAL' : 'POWER', infoLocked.deadHours);
     }
 
     // Card: show locked progress of windows while day is open; otherwise executable final info.
@@ -335,7 +394,7 @@ export function createDayAnalyzer(candles: BtcCandle[], cfg: PowerMixConfig, now
     };
   }
 
-  return { classify, classifyLocked, classifyExecutable, live, candleCount: idx.size };
+  return { classify, classifyLocked, classifyExecutable, dayReport, live, candleCount: idx.size };
 }
 
 export type DayAnalyzer = ReturnType<typeof createDayAnalyzer>;
