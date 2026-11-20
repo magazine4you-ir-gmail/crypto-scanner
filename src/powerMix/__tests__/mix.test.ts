@@ -2,11 +2,14 @@ import { describe, it, expect, vi } from 'vitest';
 
 vi.mock('@/services/supabaseClient', () => ({ supabase: {} }));
 
-import { computeStats, type SignalOutcome } from '@/services/outcomeService';
+import type { SignalOutcome } from '@/services/outcomeService';
+import { FALLBACK_PUBLIC_CONFIG } from '@/reversePlus/fallbackConfig';
+import { defaultPrefs } from '@/reversePlus/scenarioPrefs';
+import { labTrade, computeMixStats } from '../tradeCalc';
 import type { ReverseOutcome } from '@/services/reverseOutcomeService';
 import { createDayAnalyzer } from '../dayPower';
 import { DEFAULT_POWER_MIX_CONFIG as cfg, sanitizeConfig } from '../config';
-import { buildMixRows, buildViews, displaySide, matchesDayFilter, pickSide, type MixPair } from '../mix';
+import { buildMixRows, buildViews, displaySide, matchesDayFilter, pickSide, type MixPair, type MixRow } from '../mix';
 import { DAY0, dayWithMoves, tehran } from './helpers';
 
 let n = 0;
@@ -28,6 +31,9 @@ const strongDay = dayWithMoves(DAY0, 3, 3);
 const quietDay = dayWithMoves(DAY0 + 86_400_000, 0.2, 0.1);
 const analyzer = (now = NOW + 86_400_000) => createDayAnalyzer([...strongDay, ...quietDay], cfg, now);
 
+const ctx = { cfg: FALLBACK_PUBLIC_CONFIG, prefs: defaultPrefs(FALLBACK_PUBLIC_CONFIG), backtests: new Map() };
+const tr = (r: MixRow) => ({ original: labTrade('original', r.original, ctx), reverse: labTrade('reverse', r.reverse, ctx) });
+
 describe('smart mix selection', () => {
   const rows = buildMixRows([
     pair(tehran(DAY0, 12, 0), 'WIN'),                 // strong day -> original (WIN)
@@ -37,21 +43,21 @@ describe('smart mix selection', () => {
 
   it('power days use the original, neutral days use the reverse', () => {
     expect(rows.map((r) => pickSide(r.day, cfg, false))).toEqual(['original', 'original', 'reverse']);
-    const v = buildViews(rows, cfg, false);
+    const v = buildViews(rows, cfg, false, 'locked', tr);
     expect(v.mix.map((x) => x.status)).toEqual(['WIN', 'WIN', 'WIN']);
-    expect(computeStats(v.mix).winRate).toBe(100);
-    expect(computeStats(v.original).wins).toBe(2);
-    expect(computeStats(v.reverse).wins).toBe(1);
+    expect(computeMixStats(v.mix).winRate).toBe(100);
+    expect(computeMixStats(v.original).wins).toBe(2);
+    expect(computeMixStats(v.reverse).wins).toBe(1);
   });
 
   it('the verification switch shows the opposite logic', () => {
-    const v = buildViews(rows, cfg, true);
+    const v = buildViews(rows, cfg, true, 'locked', tr);
     expect(v.mix.map((x) => x.status)).toEqual(['LOSS', 'LOSS', 'LOSS']);
   });
 
   it('selection is configurable per class', () => {
     const c = sanitizeConfig({ selection: { VERY_STRONG: 'none' } });
-    const v = buildViews(rows, c, false);
+    const v = buildViews(rows, c, false, 'locked', tr);
     expect(v.mix).toHaveLength(1);
     expect(v.excluded.none).toBe(2);
   });
@@ -60,8 +66,8 @@ describe('smart mix selection', () => {
     const live = createDayAnalyzer([...strongDay, ...quietDay], cfg, tehran(DAY0 + 86_400_000, 15, 0));
     const r = buildMixRows([pair(tehran(DAY0 + 86_400_000, 12, 0), 'LOSS')], live);
     expect(r[0].day.state).toBe('PENDING');
-    expect(buildViews(r, cfg, false).mix).toHaveLength(0);
-    expect(buildViews(r, cfg, false).excluded.pending).toBe(1);
+    expect(buildViews(r, cfg, false, 'locked', tr).mix).toHaveLength(0);
+    expect(buildViews(r, cfg, false, 'locked', tr).excluded.pending).toBe(1);
     expect(displaySide(r[0], 'MIX', cfg, false)).toBe('original');
   });
 
