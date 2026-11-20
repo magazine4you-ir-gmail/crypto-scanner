@@ -8,8 +8,9 @@
 //   executable  — day class using only data known at signal time
 import type { SignalOutcome } from '@/services/outcomeService';
 import type { ReverseOutcome } from '@/services/reverseOutcomeService';
-import type { DayClass, PowerMixConfig, SidePick } from './config';
+import { selectionFor, type DayClass, type PowerMixConfig, type SidePick } from './config';
 import type { DayAnalyzer, SignalDayInfo } from './dayPower';
+import type { MixTrade, TradePair } from './tradeCalc';
 
 export interface MixPair { reverse: ReverseOutcome; original: SignalOutcome }
 
@@ -52,10 +53,13 @@ export function dayOf(row: MixRow, mode: MixMode): SignalDayInfo {
   return mode === 'executable' ? row.dayExec : row.day;
 }
 
-/** Side chosen by the day class; the "verification" switch flips original <-> reverse. Pending / no-data days pick nothing. */
+/**
+ * Side chosen by the day class (dead-hours signals use their own setting unless it is "by class");
+ * the "verification" switch flips original <-> reverse. Pending / no-data days pick nothing.
+ */
 export function pickSide(day: SignalDayInfo, cfg: PowerMixConfig, invert: boolean): SidePick {
   if (day.state !== 'FINAL' || !day.dayClass) return 'none';
-  const p = cfg.selection[day.dayClass];
+  const p = selectionFor(cfg, day.dayClass, day.deadHours);
   if (!invert) return p;
   return p === 'original' ? 'reverse' : p === 'reverse' ? 'original' : 'none';
 }
@@ -75,23 +79,25 @@ export function outcomeOf(row: MixRow, side: Side): SignalOutcome {
 }
 
 export interface MixViews {
-  original: SignalOutcome[];
-  reverse: SignalOutcome[];
+  original: MixTrade[];
+  reverse: MixTrade[];
   /** only signals whose day is final and whose class selects a side */
-  mix: SignalOutcome[];
+  mix: MixTrade[];
   /** signals left out of the mix: still pending / no BTC data / the class selects nothing */
   excluded: { pending: number; noData: number; none: number };
 }
 
-export function buildViews(rows: MixRow[], cfg: PowerMixConfig, invert: boolean, mode: MixMode = 'locked'): MixViews {
+/** `trades` gives the trade model of a row (see tradeCalc.buildTradeBook); every row must have an entry. */
+export function buildViews(rows: MixRow[], cfg: PowerMixConfig, invert: boolean, mode: MixMode, trades: (row: MixRow) => TradePair): MixViews {
   const v: MixViews = { original: [], reverse: [], mix: [], excluded: { pending: 0, noData: 0, none: 0 } };
   for (const r of rows) {
-    v.original.push(r.original);
-    v.reverse.push(r.reverse);
+    const t = trades(r);
+    v.original.push(t.original);
+    v.reverse.push(t.reverse);
     const day = dayOf(r, mode);
     const p = pickSide(day, cfg, invert);
-    if (p === 'original') v.mix.push(r.original);
-    else if (p === 'reverse') v.mix.push(r.reverse);
+    if (p === 'original') v.mix.push(t.original);
+    else if (p === 'reverse') v.mix.push(t.reverse);
     else if (day.state === 'PENDING') v.excluded.pending++;
     else if (day.state === 'NO_DATA') v.excluded.noData++;
     else v.excluded.none++;
