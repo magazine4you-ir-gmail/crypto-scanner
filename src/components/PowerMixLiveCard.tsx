@@ -1,10 +1,13 @@
 import { Card } from '@/components/UI';
+import { Chip } from '@/components/Responsive';
 import { DayChips } from '@/components/PowerMixChips';
+import { MarketThermometer, thermoTone, useThermoLabel } from '@/components/MarketThermometer';
 import { useSettings } from '@/contexts/SettingsContext';
 import { formatPercent, formatPrice } from '@/i18n/format';
 import type { PowerMixConfig } from '@/powerMix/config';
 import type { LiveStatus } from '@/powerMix/dayPower';
 import { tehranMinutes } from '@/powerMix/tehranTime';
+import { readThermo } from '@/powerMix/thermo';
 
 const PICK_TONE: Record<string, string> = {
   original: 'bg-success-500/10 border-success-500/30 text-success-400',
@@ -16,7 +19,9 @@ const PICK_TONE: Record<string, string> = {
 /** Today's BTC day power + the recommendation "use the original or the reverse signal now". Always at the top of the page. */
 export function PowerMixLiveCard({ live, cfg }: { live: LiveStatus; cfg: PowerMixConfig }) {
   const { t, lang } = useSettings();
+  const label = useThermoLabel();
   const tod = tehranMinutes(live.nowMs);
+  const thermo = readThermo(live.info, cfg);
 
   const windowCell = (label: string, pct: number | null, complete: boolean, start: number) => {
     const waiting = tod < start;
@@ -55,6 +60,19 @@ export function PowerMixLiveCard({ live, cfg }: { live: LiveStatus; cfg: PowerMi
           <p className="text-[11px] leading-4 text-slate-500 truncate">{t('pmDayMove')}</p>
           <p className="text-sm font-semibold tabular-nums text-slate-200">{day === null ? '—' : formatPercent(day, lang)}</p>
         </div>
+      </div>
+
+      <div className="rounded-lg bg-surface-100/60 p-2.5 space-y-2">
+        <div className="flex items-center justify-between gap-2 flex-wrap">
+          <p className="text-xs font-semibold text-slate-200">{t('pmThermoTitle')}</p>
+          <span className="flex items-center gap-1.5">
+            <Chip tone={thermoTone(thermo)}>{label(thermo)}</Chip>
+            {thermo.value !== null && <span className="text-xs tabular-nums text-slate-300">{t('pmThermoValue')}: {formatPercent(thermo.value, lang)}</span>}
+          </span>
+        </div>
+        <MarketThermometer reading={thermo} cfg={cfg} />
+        {thermo.conflict && <p className="text-[11px] text-warning-400">{t('pmThermoConflict')}</p>}
+        <p className="text-[10px] text-slate-500 leading-4">{t('pmThermoHint')}</p>
       </div>
 
       <div className={`rounded-lg border p-3 ${PICK_TONE[live.pick]}`}>
