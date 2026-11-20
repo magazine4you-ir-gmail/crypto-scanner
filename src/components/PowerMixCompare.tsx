@@ -1,12 +1,12 @@
 import { Card, SectionTitle } from '@/components/UI';
 import { useSettings } from '@/contexts/SettingsContext';
 import { formatNumber, formatPercent } from '@/i18n/format';
-import type { OutcomeStats } from '@/services/outcomeService';
+import type { MixStats } from '@/powerMix/tradeCalc';
 
 interface Props {
-  original: OutcomeStats;
-  reverse: OutcomeStats;
-  mix: OutcomeStats;
+  original: MixStats;
+  reverse: MixStats;
+  mix: MixStats;
   active: 'MIX' | 'ORIGINAL' | 'REVERSE';
 }
 
@@ -20,13 +20,18 @@ export function PowerMixCompare({ original, reverse, mix, active }: Props) {
   ] as const;
   const tone = (good: boolean) => (good ? 'text-success-400' : 'text-error-400');
   const pf = (v: number) => (v === Infinity ? '∞' : formatNumber(v, lang, 2));
-  const rows: { label: string; cell: (s: OutcomeStats) => { text: string; cls?: string } }[] = [
+  const signedUsd = (v: number) => `${v >= 0 ? '+' : ''}${formatNumber(v, lang, 2)}`;
+  const rows: { label: string; cell: (s: MixStats) => { text: string; cls?: string } }[] = [
     { label: t('pmClosed'), cell: (s) => ({ text: formatNumber(s.totalClosed, lang, 0) }) },
     { label: t('winRate'), cell: (s) => ({ text: formatPercent(s.winRate, lang), cls: tone(s.winRate >= s.breakEvenWinRate) }) },
     { label: `${t('win')} / ${t('loss')} / ${t('slExpired')}`, cell: (s) => ({ text: `${s.wins} / ${s.losses} / ${s.expired}` }) },
     { label: t('expectancyR'), cell: (s) => ({ text: `${s.expectancyR >= 0 ? '+' : ''}${formatNumber(s.expectancyR, lang, 2)}R`, cls: tone(s.expectancyR >= 0) }) },
     { label: t('profitFactor'), cell: (s) => ({ text: pf(s.profitFactor), cls: tone(s.profitFactor >= 1) }) },
     { label: t('totalPnl'), cell: (s) => ({ text: formatPercent(s.totalPnl, lang), cls: tone(s.totalPnl >= 0) }) },
+    { label: t('pmNetUsd'), cell: (s) => ({ text: signedUsd(s.netUsd), cls: tone(s.netUsd >= 0) }) },
+    { label: t('pmTotalR'), cell: (s) => ({ text: `${s.totalR >= 0 ? '+' : ''}${formatNumber(s.totalR, lang, 2)}R`, cls: tone(s.totalR >= 0) }) },
+    { label: t('pmMaxDd'), cell: (s) => ({ text: formatNumber(s.maxDrawdownUsd, lang, 2), cls: s.maxDrawdownUsd > 0 ? 'text-warning-400' : undefined }) },
+    { label: t('pmNoEntry'), cell: (s) => ({ text: formatNumber(s.noEntry, lang, 0), cls: 'text-slate-400' }) },
   ];
 
   return (
