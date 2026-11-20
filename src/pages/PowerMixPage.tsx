@@ -9,43 +9,46 @@ import { Stat, BucketCard } from '@/components/LabStats';
 import { DayChips } from '@/components/PowerMixChips';
 import { PowerMixLiveCard } from '@/components/PowerMixLiveCard';
 import { PowerMixCompare } from '@/components/PowerMixCompare';
-import { PowerMixOriginalCard } from '@/components/PowerMixOriginalCard';
+import { PowerMixSignalCard } from '@/components/PowerMixSignalCard';
 import { PowerMixSettingsPanel } from '@/components/PowerMixSettingsPanel';
-import { ReversePlusSignalCard } from '@/components/ReversePlusSignalCard';
+import { PowerMixScenarioBar } from '@/components/PowerMixScenarioBar';
+import { PowerMixDateRange } from '@/components/PowerMixDateRange';
+import { PowerMixDayHistory } from '@/components/PowerMixDayHistory';
+import { MarketThermometer } from '@/components/MarketThermometer';
 import { formatDate, formatNumber, formatPercent } from '@/i18n/format';
-import { computeStats, type OutcomeStatus } from '@/services/outcomeService';
 import { fetchLatestScanRun, type ScanRunRow } from '@/services/scanService';
-import { FALLBACK_PUBLIC_CONFIG, fetchEvaluationsForIds, fetchPublicConfig, type EvaluationPair, type PlusPublicConfig } from '@/services/reversePlusService';
-import { candleRangeFor, fetchBtcCandles, fetchMixPairs, fetchPowerMixConfig } from '@/services/powerMixService';
-import { resolvePrefs } from '@/reversePlus/scenarioPrefs';
+import { FALLBACK_PUBLIC_CONFIG, fetchEvaluationsForIds, fetchPublicConfig, type EvaluationPair, type PlusBacktest, type PlusPublicConfig } from '@/services/reversePlusService';
+import { MAX_MIX_ROWS, candleRangeFor, fetchBacktestsForIds, fetchBtcCandles, fetchMixPairs, fetchPowerMixConfig } from '@/services/powerMixService';
+import { clearStoredPrefs, defaultPrefs, loadStoredPrefs, saveStoredPrefs, type ScenarioPrefs } from '@/reversePlus/scenarioPrefs';
 import { isReversePlusEnabled } from '@/reversePlus/featureFlag';
 import { clearLocalOverride, loadLocalOverride, saveLocalOverride, DEFAULT_POWER_MIX_CONFIG, type PowerMixConfig } from '@/powerMix/config';
 import { createDayAnalyzer, type BtcCandle } from '@/powerMix/dayPower';
-import {
-  buildMixRows, buildViews, dayOf, displaySide, matchesDayFilter, outcomeOf, signalTimeMs,
-  type DayFilter, type MixMode, type MixPair, type MixRow, type MixView,
-} from '@/powerMix/mix';
+import { buildMixRows, buildViews, dayOf, displaySide, matchesDayFilter, signalTimeMs, type DayFilter, type MixMode, type MixPair, type MixRow, type MixView } from '@/powerMix/mix';
+import { ALL_TIME, isOrdered, keyInRange, singleDay, type DateRange } from '@/powerMix/dateRange';
+import { buildDayHistory } from '@/powerMix/history';
+import { readThermo } from '@/powerMix/thermo';
+import { buildTradeBook, computeMixStats, type MixTrade, type TradeBook, type TradeStatus } from '@/powerMix/tradeCalc';
 import { DAY_MS } from '@/powerMix/tehranTime';
 
-type StatusTab = 'ALL' | OutcomeStatus;
+type StatusTab = 'ALL' | 'OPEN' | 'WIN' | 'LOSS' | 'EXPIRED';
 type Dir = 'ALL' | 'BUY' | 'SELL';
-type TimeRange = '1d' | '7d' | '30d' | '90d' | 'ALL';
 
 const PAGE = 40;
 const REFRESH_MS = 60_000;
-const DAY_FILTERS: DayFilter[] = ['ALL', 'VERY_STRONG', 'POWER', 'MIXED', 'NEUTRAL', 'DEAD', 'PENDING'];
-const TIME_RANGE_OPTIONS: { key: TimeRange; days: number | null }[] = [
-  { key: '1d', days: 1 },
-  { key: '7d', days: 7 },
-  { key: '30d', days: 30 },
-  { key: '90d', days: 90 },
-  { key: 'ALL', days: null },
-];
+const LATEST_ROWS = 200; // the periodic refresh re-reads only the newest signals
+const DAY_FILTERS: DayFilter[] = ['ALL', 'VERY_STRONG', 'STRONG', 'POWER', 'MIXED', 'NEUTRAL', 'DEAD', 'PENDING'];
 
 function mergeCandles(prev: BtcCandle[], fresh: BtcCandle[]): BtcCandle[] {
   const m = new Map(prev.map((c) => [c.openTime, c]));
   for (const c of fresh) m.set(c.openTime, c);
   return [...m.values()].sort((a, b) => a.openTime - b.openTime);
+}
+
+/** New / changed signals replace the old copy (their status moves OPEN -> WIN / LOSS); the order stays newest first. */
+function mergePairs(prev: MixPair[], fresh: MixPair[]): MixPair[] {
+  const m = new Map(prev.map((p) => [p.reverse.id, p]));
+  for (const p of fresh) m.set(p.reverse.id, p);
+  return [...m.values()].sort((a, b) => signalTimeMs(b.original) - signalTimeMs(a.original));
 }
 
 export function PowerMixPage() {
@@ -54,10 +57,15 @@ export function PowerMixPage() {
   const navigate = useNavigate();
 
   const [pairs, setPairs] = useState<MixPair[]>([]);
+  const [truncated, setTruncated] = useState(false);
   const [candles, setCandles] = useState<BtcCandle[]>([]);
+  const [backtests, setBacktests] = useState<Map<string, PlusBacktest>>(new Map());
+  const [btFailed, setBtFailed] = useState(false);
   const [globalCfg, setGlobalCfg] = useState<PowerMixConfig>(DEFAULT_POWER_MIX_CONFIG);
   const [personal, setPersonal] = useState<PowerMixConfig | null>(() => loadLocalOverride());
   const [publicCfg, setPublicCfg] = useState<PlusPublicConfig>(FALLBACK_PUBLIC_CONFIG);
+  // the Reverse Plus scenario (leverage / sizing / amount): the SAME browser value the Reverse Plus pages use
+  const [userPrefs, setUserPrefs] = useState<ScenarioPrefs | null>(() => loadStoredPrefs());
   const [run, setRun] = useState<ScanRunRow | null>(null);
   const [nowMs, setNowMs] = useState(() => Date.now());
   const [loading, setLoading] = useState(true);
@@ -68,7 +76,7 @@ export function PowerMixPage() {
   const [mixMode, setMixMode] = useState<MixMode>('executable');
   const [invert, setInvert] = useState(false);
   const [dayFilter, setDayFilter] = useState<DayFilter>('ALL');
-  const [timeRange, setTimeRange] = useState<TimeRange>('ALL');
+  const [range, setRange] = useState<DateRange>(ALL_TIME);
   const [tab, setTab] = useState<StatusTab>('ALL');
   const [tf, setTf] = useState('ALL');
   const [dir, setDir] = useState<Dir>('ALL');
@@ -76,27 +84,34 @@ export function PowerMixPage() {
   const [evals, setEvals] = useState<Map<string, EvaluationPair>>(new Map());
 
   const cfg = personal ?? globalCfg;
+  const prefs = useMemo(() => userPrefs ?? defaultPrefs(publicCfg), [userPrefs, publicCfg]);
 
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const [p, g, pub, latest] = await Promise.all([
+      const [res, g, pub, latest] = await Promise.all([
         fetchMixPairs(),
         fetchPowerMixConfig(),
         fetchPublicConfig().catch(() => null),
         fetchLatestScanRun().catch(() => null),
       ]);
       const now = Date.now();
-      const times = p.map((x) => signalTimeMs(x.original)).filter(Number.isFinite);
-      const range = candleRangeFor(times.length ? Math.min(...times) : null, now);
+      const times = res.pairs.map((x) => signalTimeMs(x.original)).filter(Number.isFinite);
+      const rng = candleRangeFor(times.length ? Math.min(...times) : null, now);
       let c: BtcCandle[] = [];
-      try { c = await fetchBtcCandles(range.from, range.to); } catch { c = []; }
-      setPairs(p);
+      try { c = await fetchBtcCandles(rng.from, rng.to); } catch { c = []; }
+      let bts = new Map<string, PlusBacktest>();
+      let failed = false;
+      try { bts = await fetchBacktestsForIds(res.pairs.map((p) => p.reverse.id)); } catch { failed = true; }
+      setPairs(res.pairs);
+      setTruncated(res.truncated);
       setGlobalCfg(g);
       if (pub) setPublicCfg(pub);
       setRun(latest);
       setCandles(c);
+      setBacktests(bts);
+      setBtFailed(failed);
       setNoCandles(c.length === 0);
       setNowMs(now);
       setShown(PAGE);
@@ -113,18 +128,40 @@ export function PowerMixPage() {
     void load();
   }, [authLoading, user, load]);
 
-  // keep today's status live: refresh only the last two days of BTC candles once a minute while the tab is visible
+  // keep the page live once a minute while the tab is visible: today's BTC candles, the newest signals (new ones appear, open ones
+  // resolve) and the backtests of signals that did not have one yet. Nothing is re-read in full.
   const busy = useRef(false);
+  const pairsRef = useRef(pairs);
+  pairsRef.current = pairs;
+  const btRef = useRef(backtests);
+  btRef.current = backtests;
   useEffect(() => {
     if (!user) return;
     const id = setInterval(() => {
       if (document.hidden || busy.current) return;
       busy.current = true;
       const now = Date.now();
-      void fetchBtcCandles(now - 2 * DAY_MS, now)
-        .then((fresh) => { setCandles((prev) => mergeCandles(prev, fresh)); setNowMs(now); setNoCandles(false); })
-        .catch(() => undefined)
-        .finally(() => { busy.current = false; });
+      void (async () => {
+        try {
+          const [fresh, latest] = await Promise.all([
+            fetchBtcCandles(now - 2 * DAY_MS, now).catch(() => null),
+            fetchMixPairs(LATEST_ROWS).catch(() => null),
+          ]);
+          if (fresh) { setCandles((prev) => mergeCandles(prev, fresh)); setNoCandles(false); }
+          if (latest) {
+            const merged = mergePairs(pairsRef.current, latest.pairs);
+            setPairs(merged);
+            const need = merged.slice(0, 300).map((p) => p.reverse.id).filter((rid) => !btRef.current.has(rid)).slice(0, 100);
+            if (need.length) {
+              const got = await fetchBacktestsForIds(need).catch(() => null);
+              if (got && got.size) setBacktests((prev) => new Map([...prev, ...got]));
+            }
+          }
+          setNowMs(now);
+        } finally {
+          busy.current = false;
+        }
+      })();
     }, REFRESH_MS);
     return () => clearInterval(id);
   }, [user]);
@@ -133,48 +170,51 @@ export function PowerMixPage() {
   const live = useMemo(() => analyzer.live(), [analyzer]);
   const rows = useMemo(() => buildMixRows(pairs, analyzer), [pairs, analyzer]);
 
-  // فیلتر بازهٔ زمانی روی زمان صدور سیگنال
-  const timeFilteredRows = useMemo(() => {
-    const opt = TIME_RANGE_OPTIONS.find((x) => x.key === timeRange);
-    if (!opt || opt.days == null) return rows;
-    const cutoff = nowMs - opt.days * DAY_MS;
-    return rows.filter((r) => r.signalMs >= cutoff);
-  }, [rows, timeRange, nowMs]);
+  // ONE trade model for both sides: reverse = Reverse Plus backtest + the local scenario, original = its lab result in the same scenario
+  const book: TradeBook = useMemo(() => buildTradeBook(pairs, { cfg: publicCfg, prefs, backtests }), [pairs, publicCfg, prefs, backtests]);
+  const tradesOf = useCallback((row: MixRow) => book.get(row.id)!, [book]);
 
-  const dayRows = useMemo(
-    () => timeFilteredRows.filter((r) => matchesDayFilter(r, dayFilter, mixMode)),
-    [timeFilteredRows, dayFilter, mixMode],
+  const rangeOk = isOrdered(range);
+  const dateRows = useMemo(
+    () => (rangeOk ? rows.filter((r) => keyInRange(dayOf(r, mixMode).dayKey, range)) : rows),
+    [rows, range, rangeOk, mixMode],
   );
+  const dayRows = useMemo(() => dateRows.filter((r) => matchesDayFilter(r, dayFilter, mixMode)), [dateRows, dayFilter, mixMode]);
   const dayCounts = useMemo(
-    () => Object.fromEntries(
-      DAY_FILTERS.map((f) => [f, timeFilteredRows.filter((r) => matchesDayFilter(r, f, mixMode)).length]),
-    ) as Record<DayFilter, number>,
-    [timeFilteredRows, mixMode],
+    () => Object.fromEntries(DAY_FILTERS.map((f) => [f, dateRows.filter((r) => matchesDayFilter(r, f, mixMode)).length])) as Record<DayFilter, number>,
+    [dateRows, mixMode],
   );
 
-  const views = useMemo(() => buildViews(dayRows, cfg, invert, mixMode), [dayRows, cfg, invert, mixMode]);
-  const statsOriginal = useMemo(() => computeStats(views.original), [views]);
-  const statsReverse = useMemo(() => computeStats(views.reverse), [views]);
-  const statsMix = useMemo(() => computeStats(views.mix), [views]);
+  const views = useMemo(() => buildViews(dayRows, cfg, invert, mixMode, tradesOf), [dayRows, cfg, invert, mixMode, tradesOf]);
+  const statsOriginal = useMemo(() => computeMixStats(views.original), [views]);
+  const statsReverse = useMemo(() => computeMixStats(views.reverse), [views]);
+  const statsMix = useMemo(() => computeMixStats(views.mix), [views]);
   const stats = view === 'MIX' ? statsMix : view === 'ORIGINAL' ? statsOriginal : statsReverse;
   const timeframes = useMemo(() => Array.from(new Set(dayRows.map((r) => r.original.timeframe))).sort(), [dayRows]);
 
+  const history = useMemo(
+    () => buildDayHistory(dateRows, analyzer, cfg, invert, mixMode, tradesOf),
+    [dateRows, analyzer, cfg, invert, mixMode, tradesOf],
+  );
+  const missingBacktests = useMemo(() => dateRows.filter((r) => !backtests.has(r.id)).length, [dateRows, backtests]);
+
   const list = useMemo(() => {
-    const out: { row: MixRow; side: 'original' | 'reverse' }[] = [];
+    const out: { row: MixRow; trade: MixTrade }[] = [];
     for (const row of dayRows) {
       const side = displaySide(row, view, cfg, invert, mixMode);
       if (!side) continue;
-      if (tab !== 'ALL' && outcomeOf(row, side).status !== tab) continue;
+      const trade = tradesOf(row)[side];
+      if (tab !== 'ALL' && (trade.status as TradeStatus) !== tab) continue;
       if (tf !== 'ALL' && row.original.timeframe !== tf) continue;
       if (dir !== 'ALL' && row.original.signal_type !== dir) continue;
-      out.push({ row, side });
+      out.push({ row, trade });
     }
     return out;
-  }, [dayRows, view, cfg, invert, mixMode, tab, tf, dir]);
+  }, [dayRows, view, cfg, invert, mixMode, tab, tf, dir, tradesOf]);
   const visible = useMemo(() => list.slice(0, shown), [list, shown]);
 
-  // Reverse Plus enrichment (suggested entry, quality) only for the reverse cards that are on screen
-  const reverseIds = useMemo(() => visible.filter((x) => x.side === 'reverse').map((x) => x.row.reverse.id), [visible]);
+  // Reverse Plus enrichment (entry quality) only for the reverse cards that are on screen
+  const reverseIds = useMemo(() => visible.filter((x) => x.trade.side === 'reverse').map((x) => x.row.reverse.id), [visible]);
   const idsKey = reverseIds.join(',');
   useEffect(() => {
     const missing = reverseIds.filter((id) => !evals.has(id));
@@ -187,28 +227,16 @@ export function PowerMixPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [idsKey]);
 
-  const prefs = useMemo(() => resolvePrefs(publicCfg), [publicCfg, pairs]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  const openRow = useCallback((row: MixRow, side: 'original' | 'reverse') => {
-    const o = row.original;
-    if (side === 'reverse') {
+  const openTrade = useCallback((trade: MixTrade) => {
+    const o = trade.outcome;
+    if (trade.side === 'reverse') {
       navigate(isReversePlusEnabled()
-        ? `/reverse-plus/signal/${encodeURIComponent(row.reverse.id)}`
-        : `/asset/${row.reverse.symbol}?tf=${encodeURIComponent(row.reverse.timeframe)}&outcome=${encodeURIComponent(row.reverse.id)}&reverse=1`);
+        ? `/reverse-plus/signal/${encodeURIComponent(o.id)}`
+        : `/asset/${o.symbol}?tf=${encodeURIComponent(o.timeframe)}&outcome=${encodeURIComponent(o.id)}&reverse=1`);
     } else {
       navigate(`/original-plus/signal/${encodeURIComponent(o.id)}`);
     }
   }, [navigate]);
-
-  const timeRangeLabel = (key: TimeRange) => {
-    switch (key) {
-      case '1d': return t('pmRange1d');
-      case '7d': return t('pmRange7d');
-      case '30d': return t('pmRange30d');
-      case '90d': return t('pmRange90d');
-      default: return t('pmRangeAll');
-    }
-  };
 
   const header = (
     <div className="flex items-center gap-3 min-w-0">
@@ -244,6 +272,9 @@ export function PowerMixPage() {
   const dayLabel = (f: DayFilter) => (
     f === 'ALL' ? t('pmAllDays') : f === 'DEAD' ? t('pmDead') : f === 'PENDING' ? t('pmPending') : t(`pmClass${f}`)
   );
+  const dayFilters = cfg.strongPct > 0 ? DAY_FILTERS : DAY_FILTERS.filter((f) => f !== 'STRONG'); // the Strong tier only exists while it is switched on
+  const focusKey = range.from !== null && range.from === range.to ? range.from : null;
+  const usd = (v: number) => `${v >= 0 ? '+' : ''}${formatNumber(v, lang, 2)}`;
 
   return (
     <div className="space-y-4 sm:space-y-6">
@@ -271,6 +302,13 @@ export function PowerMixPage() {
           <PowerMixLiveCard live={live} cfg={cfg} />
           {noCandles && <p className="text-xs text-warning-400">{t('pmNoCandles')}</p>}
 
+          <PowerMixScenarioBar
+            prefs={prefs}
+            custom={userPrefs !== null}
+            onSave={(p) => { saveStoredPrefs(p); setUserPrefs(p); }}
+            onReset={() => { clearStoredPrefs(); setUserPrefs(null); }}
+          />
+
           <p className="text-sm text-slate-400 leading-6">{t('pmDescription')}</p>
           {lastEval && (
             <p className="text-[11px] text-slate-500">
@@ -278,6 +316,9 @@ export function PowerMixPage() {
               {run && run.outcomes_closed != null ? ` · +${formatNumber(run.outcomes_opened ?? 0, lang, 0)} / ✓${formatNumber(run.outcomes_closed, lang, 0)}` : ''}
             </p>
           )}
+          {truncated && <p className="text-xs text-warning-400">{t('pmTruncated').replace('{n}', formatNumber(MAX_MIX_ROWS, lang, 0))}</p>}
+          {btFailed && <p className="text-xs text-warning-400">{t('pmBtFailed')}</p>}
+          {!btFailed && missingBacktests > 0 && <p className="text-[11px] text-slate-500">{t('pmNoBacktest').replace('{n}', formatNumber(missingBacktests, lang, 0))}</p>}
 
           {pairs.length === 0 ? (
             <EmptyState message={t('pmNoData')} />
@@ -294,21 +335,8 @@ export function PowerMixPage() {
                 </PillRow>
                 {invert && <p className="text-[11px] text-warning-400">{t('pmInvertOn')}</p>}
 
-                {/* فیلتر بازهٔ زمانی */}
-                <div className="space-y-1.5">
-                  <p className="text-[11px] text-slate-500">{t('pmTimeRange')}</p>
-                  <PillRow>
-                    {TIME_RANGE_OPTIONS.map((opt) => (
-                      <Pill
-                        key={opt.key}
-                        active={timeRange === opt.key}
-                        onClick={() => { setTimeRange(opt.key); setShown(PAGE); }}
-                      >
-                        {timeRangeLabel(opt.key)}
-                      </Pill>
-                    ))}
-                  </PillRow>
-                </div>
+                {/* بازهٔ تاریخ — بر اساس تقویم (شمسی / میلادی) */}
+                <PowerMixDateRange value={range} nowMs={nowMs} onChange={(r) => { setRange(r); setShown(PAGE); }} />
 
                 {view === 'MIX' && (
                   <div className="space-y-1.5">
@@ -329,7 +357,7 @@ export function PowerMixPage() {
                 <div className="space-y-1.5">
                   <p className="text-[11px] text-slate-500">{t('pmDayType')}</p>
                   <PillRow>
-                    {DAY_FILTERS.map((f) => (
+                    {dayFilters.map((f) => (
                       <Pill key={f} active={dayFilter === f} onClick={() => { setDayFilter(f); setShown(PAGE); }}>
                         {dayLabel(f)} ({formatNumber(dayCounts[f], lang, 0)})
                       </Pill>
@@ -341,14 +369,21 @@ export function PowerMixPage() {
                 </div>
               </Card>
 
+              <PowerMixDayHistory
+                rows={history}
+                cfg={cfg}
+                focusKey={focusKey}
+                onPick={(key) => { setRange(focusKey === key ? ALL_TIME : singleDay(key)); setShown(PAGE); }}
+              />
+
               <PowerMixCompare original={statsOriginal} reverse={statsReverse} mix={statsMix} active={view} />
               {view === 'MIX' && excludedTotal > 0 && (
                 <p className="text-[11px] text-slate-500">{t('pmExcluded')}: {formatNumber(excludedTotal, lang, 0)} — {excludedText}</p>
               )}
 
-              <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-4 gap-2 sm:gap-3">
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-3">
                 <Stat label={t('slOpen')} value={formatNumber(stats.open, lang, 0)} />
-                <Stat label={t('totalSignals')} value={formatNumber(stats.totalClosed, lang, 0)} />
+                <Stat label={t('pmClosed')} value={formatNumber(stats.totalClosed, lang, 0)} hint={stats.noEntry ? `${t('pmNoEntry')}: ${formatNumber(stats.noEntry, lang, 0)}` : undefined} />
                 <Stat
                   label={t('winRate')} value={formatPercent(stats.winRate, lang)}
                   hint={`${t('breakEven')}: ${formatPercent(stats.breakEvenWinRate, lang)}`}
@@ -365,6 +400,13 @@ export function PowerMixPage() {
                   color={stats.profitFactor >= 1 ? 'text-success-400' : 'text-error-400'}
                 />
                 <Stat label={t('totalPnl')} value={formatPercent(stats.totalPnl, lang)} color={stats.totalPnl >= 0 ? 'text-success-400' : 'text-error-400'} />
+                <Stat label={t('pmNetUsd')} value={usd(stats.netUsd)} hint={`${t('pmTotalR')}: ${stats.totalR >= 0 ? '+' : ''}${formatNumber(stats.totalR, lang, 2)}`} color={stats.netUsd >= 0 ? 'text-success-400' : 'text-error-400'} />
+                <Stat label={t('pmMaxDd')} value={formatNumber(stats.maxDrawdownUsd, lang, 2)} color={stats.maxDrawdownUsd > 0 ? 'text-warning-400' : 'text-slate-100'} />
+                <Stat
+                  label={t('pmBestWorst')}
+                  value={stats.bestUsd === null || stats.worstUsd === null ? '—' : `${usd(stats.bestUsd)} / ${usd(stats.worstUsd)}`}
+                />
+                <Stat label={t('pmRoi')} value={formatPercent(stats.avgRoiPct, lang)} hint={stats.liquidations ? `${t('pmLiqCount')}: ${formatNumber(stats.liquidations, lang, 0)}` : undefined} color={stats.avgRoiPct >= 0 ? 'text-success-400' : 'text-error-400'} />
               </div>
 
               {stats.totalClosed > 0 && stats.totalClosed < 30 && <p className="text-xs text-warning-400">{t('pmSmallSample')}</p>}
@@ -402,30 +444,29 @@ export function PowerMixPage() {
                 <>
                   <p className="text-xs text-slate-400">{t('pmShown')} {formatNumber(visible.length, lang, 0)} {t('pmOf')} {formatNumber(list.length, lang, 0)}</p>
                   <div className="grid grid-cols-1 lg:grid-cols-2 gap-2.5">
-                    {visible.map(({ row, side }) => (
-                      <div key={row.id} className="space-y-1.5">
-                        <div className="flex items-center justify-between gap-2 px-1">
-                          <DayChips info={dayOf(row, mixMode)} />
-                          {view === 'MIX' && dayOf(row, mixMode).state === 'FINAL' && (
-                            <Chip tone={side === 'original' ? 'bg-success-500/10 text-success-400' : 'bg-primary-500/10 text-primary-300'}>
-                              {side === 'original' ? t('pmPickOriginal') : t('pmPickReverse')}
-                            </Chip>
-                          )}
-                        </div>
-                        {side === 'reverse' ? (
-                          <ReversePlusSignalCard
-                            rev={row.reverse}
-                            st={evals.get(row.reverse.id)?.signalTime ?? null}
-                            live={evals.get(row.reverse.id)?.live ?? null}
+                    {visible.map(({ row, trade }) => {
+                      const info = dayOf(row, mixMode);
+                      return (
+                        <div key={row.id} className="space-y-1.5">
+                          <div className="flex items-center justify-between gap-2 px-1">
+                            <DayChips info={info} />
+                            {view === 'MIX' && info.state === 'FINAL' && (
+                              <Chip tone={trade.side === 'original' ? 'bg-success-500/10 text-success-400' : 'bg-primary-500/10 text-primary-300'}>
+                                {trade.side === 'original' ? t('pmPickOriginal') : t('pmPickReverse')}
+                              </Chip>
+                            )}
+                          </div>
+                          <div className="px-1 w-28"><MarketThermometer reading={readThermo(info, cfg)} cfg={cfg} compact /></div>
+                          <PowerMixSignalCard
+                            trade={trade}
                             cfg={publicCfg}
                             prefs={prefs}
-                            onOpen={() => openRow(row, 'reverse')}
+                            st={trade.side === 'reverse' ? evals.get(row.reverse.id)?.signalTime ?? null : null}
+                            onOpen={openTrade}
                           />
-                        ) : (
-                          <PowerMixOriginalCard row={row} cfg={publicCfg} prefs={prefs} onOpen={() => openRow(row, 'original')} />
-                        )}
-                      </div>
-                    ))}
+                        </div>
+                      );
+                    })}
                   </div>
                   {list.length > visible.length && (
                     <div className="flex justify-center">
