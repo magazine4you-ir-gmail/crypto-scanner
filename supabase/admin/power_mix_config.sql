@@ -16,3 +16,8 @@ select * from public.power_mix_config;
 
 -- low-volume label: day's London+US volume below this fraction of the 14-day median (0 = off):
 -- update public.power_mix_config set low_volume_ratio = 0.5, updated_at = now() where id;
+
+-- (needs migration 20261120000000) Strong tier: 0 = off; otherwise above threshold_pct. Example: power 1.5 %, strong 3 %:
+-- update public.power_mix_config set threshold_pct = 1.5, strong_pct = 3, sel_strong = 'original', updated_at = now() where id;
+-- dead-hours signals get their own pick ('original' | 'reverse' | 'none' | 'byClass' = follow the day class):
+-- update public.power_mix_config set sel_dead = 'none', updated_at = now() where id;
