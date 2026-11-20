@@ -18,8 +18,7 @@ export const originalPlusTranslations: Dict = {
     en: 'Counts come straight from the original signal outcomes (the same source as Signal Lab).',
   },
   opBack: { fa: 'بازگشت به اصلی پلاس', en: 'Back to Original Plus' },
-    opBack: { fa: 'بازگشت به اصلی پلاس', en: 'Back to Original Plus' },
-
+  
   // وضعیت روی صفحهٔ جزئیات سیگنال اصلی
   opBannerOPEN: {
     fa: 'این سیگنال اصلی هنوز باز است.',
