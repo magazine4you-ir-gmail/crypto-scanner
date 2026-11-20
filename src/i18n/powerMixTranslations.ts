@@ -92,7 +92,7 @@ export const powerMixTranslations: Dict = {
     fa: 'مقادیر پیش‌فرض عمومی توسط مدیر تعیین می‌شود. تغییرهای شما فقط در همین مرورگر و فقط برای نمای خودتان اعمال می‌شود و روی سیگنال‌ها و آمار دیگران اثری ندارد.',
     en: 'Global defaults are set by the admin. Your changes apply only in this browser, only to your own view, and never affect signals or anyone else.',
   },
-  pmThreshold: { fa: 'آستانهٔ حرکت BTC (٪)', en: 'BTC move threshold (%)' },
+  pmThreshold: { fa: 'آستانهٔ «پرقدرت» — حرکت BTC (٪)', en: 'Power threshold — BTC move (%)' },
   pmLondonWindow: { fa: 'بازهٔ لندن (وقت ایران)', en: 'London window (Tehran)' },
   pmUsWindow: { fa: 'بازهٔ آمریکا (وقت ایران)', en: 'US window (Tehran)' },
   pmDeadWindow: { fa: 'ساعت مرده: از – تا', en: 'Dead hours: from – to' },
@@ -119,11 +119,122 @@ export const powerMixTranslations: Dict = {
     en: 'Uses only candles closed by signal time and never changes afterwards. The day resets at 03:30 Tehran — suitable for measuring a tradable edge.',
   },
   pmTimeRange: { fa: 'بازهٔ زمانی', en: 'Time range' },
-  pmRange1d: { fa: '۱ روز', en: '1 day' },
+  pmRange1d: { fa: 'امروز', en: 'Today' },
   pmRange7d: { fa: '۱ هفته', en: '1 week' },
   pmRange30d: { fa: '۱ ماه', en: '1 month' },
   pmRange90d: { fa: '۳ ماه', en: '3 months' },
   pmRangeAll: { fa: 'همه', en: 'All time' },
 
   pmInvalid: { fa: 'بازه‌ها معتبر نیستند (لندن باید قبل از آمریکا تمام شود و ساعت‌ها ترتیب درست داشته باشند).', en: 'The windows are not valid (London must end before US starts and times must be in order).' },
+
+  // ---- strength ladder / dead-hours pick --------------------------------------------------------------
+  pmClassSTRONG: { fa: 'قوی', en: 'Strong' },
+  pmStrongPct: { fa: 'آستانهٔ «قوی» (٪) — ۰ = خاموش', en: 'Strong threshold (%) — 0 = off' },
+  pmStrongHint: {
+    fa: 'پله‌ها: زیر آستانهٔ پرقدرت = خنثی ← از آستانهٔ پرقدرت تا آستانهٔ قوی = پرقدرت ← از آستانهٔ قوی به بالا = قوی (جهت‌ها هم‌سو نیست) یا خیلی قوی (لندن و آمریکا هم‌جهت‌اند). قدرت روز = |لندن + آمریکا| وقتی هم‌جهت‌اند، وگرنه بزرگ‌ترین بازه. روز با دو بازهٔ بزرگِ مخالف همیشه «جهت‌های مخالف» می‌ماند.',
+    en: 'Ladder: below the power threshold = neutral → power threshold up to the strong threshold = power → at/above the strong threshold = strong (sessions not aligned) or very strong (London and US move the same way). Day strength = |London + US| when aligned, otherwise the larger session. A day with two big opposite sessions stays "mixed direction".',
+  },
+  pmSelDead: { fa: 'ساعت مرده', en: 'Dead hours' },
+  pmSelByClass: { fa: 'طبق نوع روز (پیش‌فرض)', en: 'By day class (default)' },
+  pmSelDeadHint: {
+    fa: 'سیگنال‌هایی که در ساعت مرده صادر شده‌اند جدا از نوع روز تنظیم می‌شوند.',
+    en: 'Signals issued in dead hours get their own pick, separate from the day class.',
+  },
+  pmInvalidStrong: { fa: 'آستانهٔ «قوی» باید ۰ (خاموش) یا بزرگ‌تر از آستانهٔ پرقدرت باشد.', en: 'The strong threshold must be 0 (off) or above the power threshold.' },
+
+  // ---- thermometer -----------------------------------------------------------------------------------
+  pmThermoTitle: { fa: 'دماسنج بازار', en: 'Market thermometer' },
+  pmThermoValue: { fa: 'قدرت ترکیبی', en: 'Combined strength' },
+  pmThermoBear: { fa: 'نزولی', en: 'Bearish' },
+  pmThermoBull: { fa: 'صعودی', en: 'Bullish' },
+  pmThermoNeutral: { fa: 'خنثی', en: 'Neutral' },
+  pmThermoNoData: { fa: 'داده‌ای نیست', en: 'No data' },
+  pmZoneNEUTRAL: { fa: 'خنثی', en: 'Neutral' },
+  pmZoneMODERATE: { fa: 'پرقدرت', en: 'Power' },
+  pmZoneSTRONG: { fa: 'قوی', en: 'Strong' },
+  pmZoneEXTREME: { fa: 'خیلی قوی', en: 'Very strong' },
+  pmThermoConflict: { fa: 'لندن و آمریکا خلاف هم‌اند؛ دما صفر می‌شود ولی بازار آرام نیست.', en: 'London and US oppose each other: the value cancels out but the market is not quiet.' },
+  pmThermoHint: {
+    fa: 'عدد = حرکت لندن + حرکت آمریکا (در ساعت مرده: حرکت از شروع روز). قرمز = نزولی، سبز = صعودی، وسط = خنثی؛ خط‌ها آستانه‌های تنظیمات هستند.',
+    en: 'Value = London move + US move (dead hours: move since day start). Red = bearish, green = bullish, middle = neutral; ticks are your threshold settings.',
+  },
+
+  // ---- calendar range --------------------------------------------------------------------------------
+  pmDateRange: { fa: 'بازهٔ تاریخ (تقویم)', en: 'Date range (calendar)' },
+  pmRangeCustom: { fa: 'بازهٔ دلخواه', en: 'Custom range' },
+  pmDateFrom: { fa: 'از تاریخ', en: 'From' },
+  pmDateTo: { fa: 'تا تاریخ', en: 'To' },
+  pmCalJalali: { fa: 'شمسی', en: 'Jalali' },
+  pmCalGregorian: { fa: 'میلادی', en: 'Gregorian' },
+  pmDateClear: { fa: 'پاک کردن تاریخ', en: 'Clear dates' },
+  pmDateInvalid: { fa: 'تاریخ شروع باید قبل از تاریخ پایان باشد.', en: 'The start date must be before the end date.' },
+  pmDateHint: {
+    fa: 'روز بر اساس تقویم تهران (۰۰:۰۰ تا ۲۴:۰۰) و روی زمان صدور سیگنال اعمال می‌شود؛ هر دو سر بازه شامل می‌شوند.',
+    en: 'Days follow the Tehran calendar (00:00–24:00) and apply to the signal time; both ends are included.',
+  },
+  pmDateYear: { fa: 'سال', en: 'Year' },
+  pmDateMonth: { fa: 'ماه', en: 'Month' },
+  pmDateDay: { fa: 'روز', en: 'Day' },
+
+  // ---- unified signal card ----------------------------------------------------------------------------
+  pmScore: { fa: 'امتیاز', en: 'Score' },
+  pmQuality: { fa: 'کیفیت ورود', en: 'Entry quality' },
+  pmNetPnl: { fa: 'سود/زیان خالص', en: 'Net P&L' },
+  pmNetPnlUsd: { fa: 'سود/زیان (USDT)', en: 'P&L (USDT)' },
+  pmRoi: { fa: 'بازده روی مارجین', en: 'ROI on margin' },
+  pmEntryUsed: { fa: 'ورود', en: 'Entry' },
+  pmExit: { fa: 'خروج', en: 'Exit' },
+  pmSourcePLUS: { fa: 'محاسبه: معکوس پلاس', en: 'Calc: Reverse Plus' },
+  pmSourceLAB: { fa: 'نتیجهٔ آزمایشگاه', en: 'Lab result' },
+  pmStOPEN: { fa: 'باز', en: 'Open' },
+  pmStWIN: { fa: 'سود', en: 'Win' },
+  pmStLOSS: { fa: 'ضرر', en: 'Loss' },
+  pmStEXPIRED: { fa: 'منقضی', en: 'Expired' },
+  pmStNO_ENTRY: { fa: 'ورود فعال نشد', en: 'Entry not reached' },
+  pmStUNKNOWN: { fa: 'نامشخص', en: 'Undecided' },
+  pmLiquidated: { fa: 'لیکویید', en: 'Liquidated' },
+
+  // ---- extra statistics --------------------------------------------------------------------------------
+  pmNetUsd: { fa: 'سود خالص (USDT)', en: 'Net profit (USDT)' },
+  pmMaxDd: { fa: 'بیشینهٔ افت (USDT)', en: 'Max drawdown (USDT)' },
+  pmNoEntry: { fa: 'بدون ورود', en: 'No entry' },
+  pmTotalR: { fa: 'مجموع R', en: 'Total R' },
+  pmLiqCount: { fa: 'لیکوید شده', en: 'Liquidated' },
+  pmBestWorst: { fa: 'بهترین / بدترین (USDT)', en: 'Best / worst (USDT)' },
+  pmCountedClosed: { fa: 'بسته‌شده', en: 'Closed' },
+
+  // ---- scenario bar (shared with the Reverse Plus pages) -------------------------------------------------
+  pmScenario: { fa: 'سناریوی محاسبه — همان تنظیمات معکوس پلاس', en: 'Calculation scenario — same as Reverse Plus' },
+  pmLeverage: { fa: 'اهرم', en: 'Leverage' },
+  pmSizing: { fa: 'اندازهٔ پوزیشن', en: 'Position sizing' },
+  pmFixedRisk: { fa: 'ریسک ثابت', en: 'Fixed risk' },
+  pmFixedNotional: { fa: 'حجم ثابت', en: 'Fixed notional' },
+  pmAmount: { fa: 'مبلغ (USDT)', en: 'Amount (USDT)' },
+  pmScenarioHint: {
+    fa: 'سود و زیان معکوس‌ها از بک‌تست معکوس پلاس (ورود پیشنهادی، حد ضرر و هدف معکوس، کارمزد و لغزش) با همین اهرم و مبلغ محاسبه می‌شود؛ اصلی هم با همین سناریو به USDT تبدیل می‌شود. این مقادیر با صفحات معکوس پلاس مشترک و فقط در همین مرورگر ذخیره می‌شوند.',
+    en: 'Reverse P&L comes from the Reverse Plus backtest (recommended entry, reverse stop / target, fees and slippage) with this leverage and amount; the original is converted to USDT with the same scenario. Values are shared with the Reverse Plus pages and stored in this browser only.',
+  },
+  pmScenarioSave: { fa: 'ذخیره', en: 'Save' },
+
+  // ---- day history ---------------------------------------------------------------------------------------
+  pmHistoryTitle: { fa: 'سابقهٔ روزها', en: 'Day history' },
+  pmHistoryHint: {
+    fa: 'هر ردیف یک روز معاملاتی (۰۳:۳۰ تا ۰۳:۳۰ تهران) است: دما، نوع روز، تعداد سیگنال‌ها و نتیجهٔ میکس. روی یک روز بزنید تا آمار و فهرست فقط همان روز نشان داده شود.',
+    en: 'Each row is one trading day (03:30 → 03:30 Tehran): temperature, day class, signal count and the mix result. Tap a day to see the stats and list for that day only.',
+  },
+  pmHistoryDay: { fa: 'روز', en: 'Day' },
+  pmHistorySignals: { fa: 'سیگنال', en: 'Signals' },
+  pmHistoryMix: { fa: 'میکس', en: 'Mix' },
+  pmHistoryPick: { fa: 'فیلتر همین روز', en: 'Filter to this day' },
+  pmHistoryEmpty: { fa: 'روزی در این بازه نیست.', en: 'No days in this range.' },
+  pmHistoryMore: { fa: 'نمایش روزهای بیشتر', en: 'Show more days' },
+  pmDayPending: { fa: 'در حال تعیین', en: 'Pending' },
+
+  // ---- notices ---------------------------------------------------------------------------------------
+  pmTruncated: { fa: 'فقط {n} سیگنال آخر بارگذاری شد؛ سابقهٔ قدیمی‌تر ناقص است.', en: 'Only the latest {n} signals were loaded; older history is incomplete.' },
+  pmNoBacktest: {
+    fa: 'برای {n} سیگنال معکوس هنوز بک‌تست معکوس پلاس وجود ندارد؛ برای آن‌ها نتیجهٔ آزمایشگاه معکوس استفاده شد.',
+    en: '{n} reverse signals have no Reverse Plus backtest yet; their Reverse Lab result is used instead.',
+  },
+  pmBtFailed: { fa: 'خواندن بک‌تست معکوس پلاس ممکن نشد؛ همهٔ معکوس‌ها با نتیجهٔ آزمایشگاه نمایش داده شدند.', en: 'Could not read the Reverse Plus backtests; all reverse results use the Reverse Lab outcome.' },
 };
