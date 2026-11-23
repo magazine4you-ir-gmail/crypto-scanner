@@ -108,12 +108,13 @@ export function PowerMixPage() {
     }
   }, []);
 
-  // فقط یک بار هنگام ورود به صفحه (نه با عوض کردن تب مرورگر)
   useEffect(() => {
     if (authLoading) return;
     if (!user) { setLoading(false); return; }
     void load();
   }, [authLoading, user, load]);
+
+  // رفرش خودکار حذف شد — فقط با دکمه بازخوانی
 
   const analyzer = useMemo(() => createDayAnalyzer(candles, cfg, nowMs), [candles, cfg, nowMs]);
   const live = useMemo(() => analyzer.live(), [analyzer]);
@@ -146,6 +147,7 @@ export function PowerMixPage() {
   );
   const missingBacktests = useMemo(() => dateRows.filter((r) => !backtests.has(r.id)).length, [dateRows, backtests]);
 
+  // تعداد هر وضعیت برای نمایش روی تب‌ها
   const statusCounts = useMemo(() => {
     const c = { ALL: 0, OPEN: 0, WIN: 0, LOSS: 0, EXPIRED: 0 };
     for (const row of dayRows) {
@@ -179,6 +181,7 @@ export function PowerMixPage() {
       out.push({ row, trade });
     }
 
+    // مرتب‌سازی
     if (sort === 'score') {
       out.sort((a, b) => (b.row.original.score ?? 0) - (a.row.original.score ?? 0)
         || signalTimeMs(b.row.original) - signalTimeMs(a.row.original));
@@ -191,6 +194,7 @@ export function PowerMixPage() {
     } else if (sort === 'newest') {
       out.sort((a, b) => signalTimeMs(b.row.original) - signalTimeMs(a.row.original));
     }
+    // sort === 'all' → ترتیب پیش‌فرض (جدیدترین اول از mergePairs)
 
     return out;
   }, [dayRows, view, cfg, invert, mixMode, tab, tf, dir, query, sort, tradesOf]);
@@ -294,6 +298,7 @@ export function PowerMixPage() {
             onReset={() => { clearStoredPrefs(); setUserPrefs(null); }}
           />
 
+          {/* المان آخرین اسکن (مثل auto-scan) */}
           <Card className="!p-3 sm:!p-4">
             <div className="text-slate-400 text-sm">{t('asLastScan')}</div>
             <p className="text-sm font-semibold text-slate-100 mt-1">
@@ -418,6 +423,7 @@ export function PowerMixPage() {
                 </div>
               )}
 
+              {/* فیلتر سیگنال‌ها + مرتب‌سازی + جستجو */}
               <Card className="!p-3 sm:!p-4 space-y-3">
                 <PillRow>
                   {statusTabs.map((x) => (
