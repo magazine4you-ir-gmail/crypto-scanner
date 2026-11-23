@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import type { Session, User } from '@supabase/supabase-js';
 import { supabase } from '@/services/supabaseClient';
 
@@ -16,7 +16,20 @@ const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
+  const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
+
+  // user فقط وقتی کاربر واقعاً عوض شد (id متفاوت) reference جدید می‌گیرد.
+  // با برگشت به تب، Supabase توکن را رفرش می‌کند و session/user جدید می‌سازد؛
+  // اگر user عوض می‌شد، همه صفحاتی که به user وابسته‌اند دوباره load می‌کردند.
+  const applySession = useCallback((next: Session | null) => {
+    setSession(next);
+    setUser((prev) => {
+      const nextUser = next?.user ?? null;
+      if (prev?.id === nextUser?.id) return prev;
+      return nextUser;
+    });
+  }, []);
 
   useEffect(() => {
     let listener: { subscription: { unsubscribe: () => void } } | null = null;
@@ -24,7 +37,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     (async () => {
       try {
         const { data } = await supabase.auth.getSession();
-        setSession(data.session);
+        applySession(data.session);
       } catch {
         // Supabase unreachable — continue without a session
       } finally {
@@ -34,7 +47,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     try {
       const { data } = supabase.auth.onAuthStateChange((_event, newSession) => {
-        setSession(newSession);
+        applySession(newSession);
       });
       listener = data;
     } catch {
@@ -44,7 +57,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => {
       listener?.subscription.unsubscribe();
     };
-  }, []);
+  }, [applySession]);
 
   const signIn = async (email: string, password: string) => {
     try {
@@ -83,11 +96,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  return (
-    <AuthContext.Provider value={{ session, user: session?.user ?? null, loading, signIn, signUp, signOut, resetPassword }}>
-      {children}
-    </AuthContext.Provider>
+  const value = useMemo(
+    () => ({ session, user, loading, signIn, signUp, signOut, resetPassword }),
+    // توابع signIn/... هر رندر ساخته می‌شوند ولی رفتارشان به state وابسته نیست
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [session, user, loading],
   );
+
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
 
 export function useAuth() {
