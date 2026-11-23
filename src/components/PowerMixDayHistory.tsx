@@ -14,18 +14,17 @@ const CLASS_TONE: Record<DayClass, string> = {
   MIXED: 'bg-warning-500/20 text-warning-400',
   NEUTRAL: 'bg-surface-200 text-slate-300',
 };
-const PAGE = 14;
+const PAGE = 1; // فقط آخرین روز به صورت پیش‌فرض
 const tone = (v: number) => (v >= 0 ? 'text-success-400' : 'text-error-400');
 
 interface Props { rows: DayHistoryRow[]; cfg: PowerMixConfig; focusKey: string | null; onPick: (dayKey: string) => void }
 
-/** One record per trading day: thermometer, day class, London / US moves, signal count and the smart-mix result of that day. */
 export function PowerMixDayHistory({ rows, cfg, focusKey, onPick }: Props) {
   const { t, lang } = useSettings();
   const label = useThermoLabel();
   const [shown, setShown] = useState(PAGE);
   const fmtDay = useMemo(() => new Intl.DateTimeFormat(lang === 'fa' ? 'fa-IR' : 'en-US', { year: 'numeric', month: 'short', day: 'numeric', weekday: 'short', timeZone: 'UTC' }), [lang]);
-  const dayText = (key: string) => fmtDay.format(new Date(`${key}T12:00:00Z`)); // the key is a calendar date: print it as that date, in the chosen calendar
+  const dayText = (key: string) => fmtDay.format(new Date(`${key}T12:00:00Z`));
   const sign = (v: number | null) => (v === null ? '—' : formatPercent(v, lang));
 
   return (
@@ -74,7 +73,13 @@ export function PowerMixDayHistory({ rows, cfg, focusKey, onPick }: Props) {
               </button>
             );
           })}
-          {rows.length > shown && <div className="flex justify-center"><button className="btn-secondary text-sm" onClick={() => setShown((n) => n + PAGE)}>{t('pmHistoryMore')}</button></div>}
+          {rows.length > shown && (
+            <div className="flex justify-center">
+              <button className="btn-secondary text-sm" onClick={() => setShown((n) => n + PAGE)}>
+                {lang === 'fa' ? 'نمایش بیشتر روزها' : t('pmHistoryMore')}
+              </button>
+            </div>
+          )}
         </div>
       )}
     </Card>
