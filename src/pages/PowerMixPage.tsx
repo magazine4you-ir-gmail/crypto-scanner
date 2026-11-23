@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Layers, RefreshCw, Search } from 'lucide-react';
 import { useSettings } from '@/contexts/SettingsContext';
@@ -108,11 +108,15 @@ export function PowerMixPage() {
     }
   }, []);
 
+  const userId = user?.id ?? null;
+  const loadedForRef = useRef<string | null>(null);
   useEffect(() => {
     if (authLoading) return;
-    if (!user) { setLoading(false); return; }
+    if (!userId) { loadedForRef.current = null; setLoading(false); return; }
+    if (loadedForRef.current === userId) return; // فقط یک‌بار برای هر کاربر
+    loadedForRef.current = userId;
     void load();
-  }, [authLoading, user, load]);
+  }, [authLoading, userId, load]);
 
   // رفرش خودکار حذف شد — فقط با دکمه بازخوانی
 
