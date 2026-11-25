@@ -1,33 +1,50 @@
 import { useEffect, useMemo, useState } from 'react';
-import { ChevronDown, ChevronUp, SlidersHorizontal, Sparkles } from 'lucide-react';
+import { ChevronDown, ChevronUp, SlidersHorizontal, Sparkles, ListChecks } from 'lucide-react';
 import { Card } from '@/components/UI';
 import { Chip } from '@/components/Responsive';
 import { useSettings } from '@/contexts/SettingsContext';
-import { DAY_CLASSES, isValidConfig, type DayClass, type DeadPick, type PowerMixConfig, type SidePick } from '@/powerMix/config';
+import {
+  DAY_CLASSES,
+  isValidConfig,
+  type DayClass,
+  type DeadPick,
+  type PowerMixConfig,
+  type SidePick,
+} from '@/powerMix/config';
 import { formatHHMM } from '@/powerMix/tehranTime';
-import { autoTuneSelection, type AutoTuneResult, type BucketTune } from '@/powerMix/autoTune';
+import {
+  ALL_TUNE_METRICS,
+  DEFAULT_TUNE_METRICS,
+  autoTuneSelection,
+  type AutoTuneResult,
+  type BucketTune,
+  type TuneMetric,
+} from '@/powerMix/autoTune';
 import type { MixMode, MixRow } from '@/powerMix/mix';
 import type { TradePair } from '@/powerMix/tradeCalc';
 import { formatNumber, formatPercent } from '@/i18n/format';
 
 interface Props {
+  /** the config in effect (personal override if any, else the global default) */
   value: PowerMixConfig;
   personal: boolean;
   onSave: (cfg: PowerMixConfig) => void;
   onReset: () => void;
-  /** rows in the current date range ( fore auto-tune) */
+  /** rows in the current date range (for auto-tune) */
   rows?: MixRow[];
   tradesOf?: (row: MixRow) => TradePair;
   mixMode?: MixMode;
 }
 
-const TIMES = Array.from({ length: 49 }, (_, i) => i * 30);
+const TIMES = Array.from({ length: 49 }, (_, i) => i * 30); // 00:00 … 24:00
 
 function TimeSelect({ value, onChange, label }: { value: number; onChange: (v: number) => void; label: string }) {
   return (
     <select className="input-field text-sm" value={value} onChange={(e) => onChange(Number(e.target.value))} aria-label={label}>
       {TIMES.map((m) => (
-        <option key={m} value={m}>{formatHHMM(m)}</option>
+        <option key={m} value={m}>
+          {formatHHMM(m)}
+        </option>
       ))}
     </select>
   );
@@ -44,7 +61,16 @@ function bucketTitle(t: (k: string) => string, key: BucketTune['key']) {
   return key === 'DEAD' ? t('pmSelDead') : t(`pmClass${key}`);
 }
 
-export function PowerMixSettingsPanel({ value, personal, onSave, onReset, rows, tradesOf, mixMode = 'executable' }: Props) {
+/** Global defaults come from the DB; this panel stores a PERSONAL override in this browser only (never sent anywhere). */
+export function PowerMixSettingsPanel({
+  value,
+  personal,
+  onSave,
+  onReset,
+  rows,
+  tradesOf,
+  mixMode = 'executable',
+}: Props) {
   const { t, lang } = useSettings();
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState<PowerMixConfig>(value);
@@ -53,6 +79,8 @@ export function PowerMixSettingsPanel({ value, personal, onSave, onReset, rows, 
   const [vol, setVol] = useState(String(value.lowVolumeRatio));
   const [tune, setTune] = useState<AutoTuneResult | null>(null);
   const [tuneError, setTuneError] = useState<string | null>(null);
+  const [metricsOpen, setMetricsOpen] = useState(false);
+  const [metrics, setMetrics] = useState<TuneMetric[]>(() => [...DEFAULT_TUNE_METRICS]);
 
   useEffect(() => {
     setDraft(value);
@@ -63,7 +91,12 @@ export function PowerMixSettingsPanel({ value, personal, onSave, onReset, rows, 
 
   const num = (v: string) => (v.trim() === '' ? 0 : Number(v.replace(',', '.')));
   const candidate = useMemo<PowerMixConfig>(
-    () => ({ ...draft, thresholdPct: Number(thr.replace(',', '.')), strongPct: num(strong), lowVolumeRatio: Number(vol.replace(',', '.')) }),
+    () => ({
+      ...draft,
+      thresholdPct: Number(thr.replace(',', '.')),
+      strongPct: num(strong),
+      lowVolumeRatio: Number(vol.replace(',', '.')),
+    }),
     [draft, thr, strong, vol],
   );
   const strongOn = candidate.strongPct > 0;
@@ -79,14 +112,27 @@ export function PowerMixSettingsPanel({ value, personal, onSave, onReset, rows, 
   const setDeadPick = (v: DeadPick) =>
     setDraft((d) => ({ ...d, selection: { ...d.selection, DEAD: v } }));
 
+  const toggleMetric = (m: TuneMetric) => {
+    setMetrics((prev) => (prev.includes(m) ? prev.filter((x) => x !== m) : [...prev, m]));
+  };
+  const selectAllMetrics = () => setMetrics([...ALL_TUNE_METRICS]);
+  const selectDefaultMetrics = () => setMetrics([...DEFAULT_TUNE_METRICS]);
+  const clearMetrics = () => setMetrics([]);
+
+  const metricLabel = (m: TuneMetric) => t(`pmMetric_${m}`);
+
   const runAutoTune = () => {
     setTuneError(null);
     if (!rows || !tradesOf) {
       setTuneError(t('pmAutoNoData'));
       return;
     }
+    if (metrics.length === 0) {
+      setTuneError(t('pmAutoNoMetrics'));
+      return;
+    }
     try {
-      const result = autoTuneSelection(rows, tradesOf, mixMode, candidate);
+      const result = autoTuneSelection(rows, tradesOf, mixMode, candidate, metrics);
       setTune(result);
       setDraft((d) => ({ ...d, selection: result.selection }));
     } catch (e) {
@@ -160,27 +206,84 @@ export function PowerMixSettingsPanel({ value, personal, onSave, onReset, rows, 
             </div>
           </div>
 
+          {/* ── کدام سیگنال معتبر است؟ + تنظیم خودکار + معیارها ── */}
           <div className="space-y-2">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <span className="text-xs text-slate-400">{t('pmSelection')}</span>
-              <button
-                type="button"
-                className="btn-secondary text-xs inline-flex items-center gap-1.5"
-                disabled={!canTune}
-                onClick={runAutoTune}
-                title={!canTune ? t('pmAutoNoData') : t('pmAutoHint')}
-              >
-                <Sparkles className="w-3.5 h-3.5" />
-                {t('pmAutoTune')}
-              </button>
+              <div className="flex flex-wrap gap-1.5">
+                <button
+                  type="button"
+                  className="btn-secondary text-xs inline-flex items-center gap-1.5"
+                  onClick={() => setMetricsOpen((o) => !o)}
+                >
+                  <ListChecks className="w-3.5 h-3.5" />
+                  {t('pmAutoMetrics')}
+                  <span className="tabular-nums opacity-80">
+                    ({metrics.length}/{ALL_TUNE_METRICS.length})
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  className="btn-secondary text-xs inline-flex items-center gap-1.5"
+                  disabled={!canTune || metrics.length === 0}
+                  onClick={runAutoTune}
+                  title={!canTune ? t('pmAutoNoData') : t('pmAutoHint')}
+                >
+                  <Sparkles className="w-3.5 h-3.5" />
+                  {t('pmAutoTune')}
+                </button>
+              </div>
             </div>
             <p className="text-[11px] text-slate-500 leading-4">{t('pmAutoHint')}</p>
+
+            {metricsOpen && (
+              <div className="rounded-lg border border-surface-200 bg-surface-100/40 p-3 space-y-2">
+                <div className="flex flex-wrap gap-2">
+                  <button type="button" className="btn-secondary text-[11px]" onClick={selectAllMetrics}>
+                    {t('pmAutoAllMetrics')}
+                  </button>
+                  <button type="button" className="btn-secondary text-[11px]" onClick={selectDefaultMetrics}>
+                    {t('pmAutoDefaultMetrics')}
+                  </button>
+                  <button type="button" className="btn-secondary text-[11px]" onClick={clearMetrics}>
+                    {t('pmAutoClearMetrics')}
+                  </button>
+                </div>
+                <p className="text-[10px] text-slate-500 leading-4">{t('pmAutoMetricsHint')}</p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+                  {ALL_TUNE_METRICS.map((m) => {
+                    const on = metrics.includes(m);
+                    return (
+                      <label
+                        key={m}
+                        className={`flex items-center gap-2 rounded-md px-2 py-1.5 text-xs cursor-pointer border ${
+                          on
+                            ? 'border-primary-500/40 bg-primary-500/10 text-slate-100'
+                            : 'border-transparent text-slate-400'
+                        }`}
+                      >
+                        <input
+                          type="checkbox"
+                          className="rounded border-surface-300"
+                          checked={on}
+                          onChange={() => toggleMetric(m)}
+                        />
+                        <span>{metricLabel(m)}</span>
+                      </label>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
               {DAY_CLASSES.map((c) => {
                 const off = c === 'STRONG' && !strongOn;
                 return (
-                  <div key={c} className={`flex items-center justify-between gap-2 rounded-lg bg-surface-100/60 px-3 py-2 ${off ? 'opacity-50' : ''}`}>
+                  <div
+                    key={c}
+                    className={`flex items-center justify-between gap-2 rounded-lg bg-surface-100/60 px-3 py-2 ${off ? 'opacity-50' : ''}`}
+                  >
                     <span className="text-sm text-slate-200">{t(`pmClass${c}`)}</span>
                     <select
                       className="input-field text-sm !w-auto"
@@ -225,8 +328,11 @@ export function PowerMixSettingsPanel({ value, personal, onSave, onReset, rows, 
                   .replace('{n}', formatNumber(tune.totalSignals, lang, 0))
                   .replace('{usd}', `${tune.overall.netUsd >= 0 ? '+' : ''}${formatNumber(tune.overall.netUsd, lang, 2)}`)
                   .replace('{r}', `${tune.overall.totalR >= 0 ? '+' : ''}${formatNumber(tune.overall.totalR, lang, 2)}`)
-                  .replace('{wr}', formatPercent(tune.overall.winRate * 100, lang))
+                  .replace('{wr}', formatPercent(tune.overall.winRate, lang))
                   .replace('{c}', formatNumber(tune.overall.closed, lang, 0))}
+              </p>
+              <p className="text-[10px] text-slate-500">
+                {t('pmAutoMetricsUsed')}: {tune.metricsUsed.map((m) => metricLabel(m)).join(' · ')}
               </p>
               <div className="space-y-1.5">
                 {tune.buckets.map((b) => (
@@ -241,10 +347,9 @@ export function PowerMixSettingsPanel({ value, personal, onSave, onReset, rows, 
                     </div>
                     <div className="text-slate-500 mt-0.5">
                       {b.ranked
-                        .filter((s) => s.pick !== 'none' || s.closed > 0 || true)
                         .map((s) => {
                           const tag = pickLabel(t, String(s.pick));
-                          if (s.pick === 'none') {
+                          if (s.pick === 'none' && s.closed === 0) {
                             return `${tag}: 0`;
                           }
                           return `${tag}: ${s.wins}/${s.losses}/${s.expired} · ${s.netUsd >= 0 ? '+' : ''}${formatNumber(s.netUsd, lang, 1)}$ · ${s.totalR >= 0 ? '+' : ''}${formatNumber(s.totalR, lang, 1)}R`;
