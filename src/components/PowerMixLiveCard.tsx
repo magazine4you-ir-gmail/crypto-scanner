@@ -16,7 +16,6 @@ const PICK_TONE: Record<string, string> = {
   WAIT: 'bg-surface-100 border-surface-200 text-slate-300',
 };
 
-/** Today's BTC day power + the recommendation "use the original or the reverse signal now". Always at the top of the page. */
 export function PowerMixLiveCard({ live, cfg }: { live: LiveStatus; cfg: PowerMixConfig }) {
   const { t, lang } = useSettings();
   const label = useThermoLabel();
@@ -57,12 +56,8 @@ export function PowerMixLiveCard({ live, cfg }: { live: LiveStatus; cfg: PowerMi
           ? t('pmUseNone')
           : t('pmUseWait');
 
-  const dayMove = live.info.dayMovePct;
-  const sessionSum = thermo.sessionSum;
-
   return (
     <Card className="!p-4 space-y-3">
-      {/* Header */}
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0 space-y-1.5">
           <p className="text-sm font-semibold text-slate-100">{t('pmLiveTitle')}</p>
@@ -76,19 +71,18 @@ export function PowerMixLiveCard({ live, cfg }: { live: LiveStatus; cfg: PowerMi
         </div>
       </div>
 
-      {/* Session windows + Day move */}
       <div className="grid grid-cols-3 gap-3 rounded-lg bg-surface-100/60 p-2.5">
         {windowCell(t('pmLondon'), live.info.londonPct, live.londonComplete, cfg.london.start)}
         {windowCell(t('pmUs'), live.info.usPct, live.usComplete, cfg.us.start)}
         <div className="min-w-0">
           <p className="text-[11px] leading-4 text-slate-500 truncate">{t('pmDayMove')}</p>
           <p className="text-sm font-semibold tabular-nums text-slate-200">
-            {dayMove === null ? '—' : formatPercent(dayMove, lang)}
+            {live.info.dayMovePct === null ? '—' : formatPercent(live.info.dayMovePct, lang)}
           </p>
         </div>
       </div>
 
-      {/* Thermometer – Primary = Day Move */}
+      {/* دماسنج اصلی + لایه تحلیلی */}
       <div className="rounded-lg bg-surface-100/60 p-2.5 space-y-2">
         <div className="flex items-center justify-between gap-2 flex-wrap">
           <p className="text-xs font-semibold text-slate-200">{t('pmThermoTitle')}</p>
@@ -96,7 +90,7 @@ export function PowerMixLiveCard({ live, cfg }: { live: LiveStatus; cfg: PowerMi
             <Chip tone={thermoTone(thermo)}>{label(thermo)}</Chip>
             {thermo.value !== null && (
               <span className="text-xs tabular-nums text-slate-300">
-                {t('pmThermoValue')}: {formatPercent(thermo.value, lang)}
+                {formatPercent(thermo.value, lang)}
               </span>
             )}
           </span>
@@ -104,47 +98,38 @@ export function PowerMixLiveCard({ live, cfg }: { live: LiveStatus; cfg: PowerMi
 
         <MarketThermometer reading={thermo} cfg={cfg} />
 
-        {/* Analytical layer */}
-        <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1 text-[11px] leading-4 text-slate-400">
-          {sessionSum !== null && (
+        {/* لایه تحلیلی واضح */}
+        <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1 text-[11px] leading-4 text-slate-400 pt-1">
+          {thermo.sessionSum !== null && (
             <span>
               {t('pmLondon')}+{t('pmUs')}:{' '}
-              <span className="text-slate-300 tabular-nums">
-                {formatPercent(sessionSum, lang)}
+              <span className="text-slate-200 tabular-nums font-medium">
+                {formatPercent(thermo.sessionSum, lang)}
               </span>
             </span>
           )}
-
           {live.info.dayClass && (
             <span>
-              | <span className="text-slate-300 font-medium">{live.info.dayClass}</span>
+              | <span className="text-slate-200 font-medium">{live.info.dayClass}</span>
             </span>
           )}
-
           {thermo.conflict && (
-            <span className="text-warning-400">| {t('pmThermoConflict')}</span>
+            <span className="text-warning-400 font-medium">| {t('pmThermoConflict')}</span>
           )}
-
           {live.info.deadHours && (
             <span className="text-slate-500">| {t('pmBasedOnDead')}</span>
           )}
         </div>
 
         <p className="text-[10px] text-slate-500 leading-4">
-          {t('pmThermoHint') ||
-            'عدد اصلی = حرکت بیت‌کوین از شروع روز معاملاتی. لایه زیر = وضعیت لندن+آمریکا و کلاس روز.'}
+          عدد اصلی = حرکت بیت‌کوین از شروع روز معاملاتی (۰۳:۳۰ تهران). لایه زیر = لندن+آمریکا + کلاس روز.
         </p>
       </div>
 
-      {/* Recommendation */}
       <div className={`rounded-lg border p-3 ${PICK_TONE[live.pick] || PICK_TONE.WAIT}`}>
         <p className="text-sm font-semibold">{pickLabel}</p>
-        {live.approximate && (
-          <p className="text-[11px] mt-1 opacity-80">{t('pmApprox')}</p>
-        )}
-        {live.info.deadHours && (
-          <p className="text-[11px] mt-1 opacity-80">{t('pmBasedOnDead')}</p>
-        )}
+        {live.approximate && <p className="text-[11px] mt-1 opacity-80">{t('pmApprox')}</p>}
+        {live.info.deadHours && <p className="text-[11px] mt-1 opacity-80">{t('pmBasedOnDead')}</p>}
       </div>
     </Card>
   );
