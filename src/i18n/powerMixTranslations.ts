@@ -237,4 +237,23 @@ export const powerMixTranslations: Dict = {
     en: '{n} reverse signals have no Reverse Plus backtest yet; their Reverse Lab result is used instead.',
   },
   pmBtFailed: { fa: 'خواندن بک‌تست معکوس پلاس ممکن نشد؛ همهٔ معکوس‌ها با نتیجهٔ آزمایشگاه نمایش داده شدند.', en: 'Could not read the Reverse Plus backtests; all reverse results use the Reverse Lab outcome.' },
+    pmAutoTune: { fa: 'تنظیم خودکار', en: 'Auto-tune' },
+  pmAutoHint: {
+    fa: 'بر اساس سیگنال‌های بسته‌شده (سود / زیان / منقضی) در بازهٔ تاریخ فعلی، برای هر نوع روز بهترین انتخاب «اصلی / معکوس / هیچ‌کدام» را پیشنهاد می‌دهد. آستانه‌ها و بازه‌های زمانی عوض نمی‌شوند. نتیجه فقط روی پیش‌نویس تنظیمات شما اعمال می‌شود تا «ذخیره برای من» را بزنید.',
+    en: 'Using closed signals (win / loss / expired) in the current date range, suggests the best original / reverse / neither pick per day class. Thresholds and time windows are not changed. Applies only to your draft until you press Save for me.',
+  },
+  pmAutoNoData: {
+    fa: 'سیگنالی برای محاسبه نیست؛ اول صفحه را بارگذاری کنید.',
+    en: 'No signals to analyse — load the page first.',
+  },
+  pmAutoResult: { fa: 'پیشنهاد تنظیم خودکار', en: 'Auto-tune suggestion' },
+  pmAutoOverall: {
+    fa: 'روی {n} سیگنال نهایی · میکس پیشنهادی: {usd} USDT · {r}R · نرخ برد {wr} · {c} معاملهٔ بسته',
+    en: 'On {n} final signals · suggested mix: {usd} USDT · {r}R · win rate {wr} · {c} closed trades',
+  },
+  pmAutoWeak: { fa: 'نمونه کوچک', en: 'small sample' },
+  pmAutoNote: {
+    fa: 'معیار اصلی: بیشترین سود خالص USDT؛ در صورت تساوی مجموع R و بعد نرخ برد. اگر هر دو طرف منفی باشند «هیچ‌کدام» انتخاب می‌شود. این بهینه‌سازی روی گذشته است و آینده را تضمین نمی‌کند.',
+    en: 'Primary metric: highest net USDT; ties broken by total R then win rate. If both sides are negative, “neither” is chosen. This fits the past only and does not guarantee the future.',
+  },
 };
