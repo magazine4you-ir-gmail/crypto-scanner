@@ -1,9 +1,63 @@
-// Power Mix — auto-tune the selection table from closed trade outcomes (PURE).
-// For each day class (and dead hours) compares original vs reverse vs none on WIN/LOSS/EXPIRED
-// and picks the side with the best net USDT (then total R, then win rate). Does not change thresholds or windows.
+// Power Mix — auto-tune selection from closed trades, multi-metric checklist (PURE).
 import { DAY_CLASSES, selectionFor, type DayClass, type DeadPick, type PowerMixConfig, type SidePick } from './config';
 import { dayOf, type MixMode, type MixRow } from './mix';
 import type { MixTrade, TradePair } from './tradeCalc';
+
+/** Metrics aligned with the Power Mix comparison / stats cards. */
+export type TuneMetric =
+  | 'closed'
+  | 'winRate'
+  | 'wins'
+  | 'losses'
+  | 'expired'
+  | 'expectancyR'
+  | 'profitFactor'
+  | 'totalPnl'
+  | 'netUsd'
+  | 'totalR'
+  | 'maxDrawdown'
+  | 'noEntry';
+
+/** true = higher is better; false = lower is better */
+export const METRIC_HIGHER_BETTER: Record<TuneMetric, boolean> = {
+  closed: true,
+  winRate: true,
+  wins: true,
+  losses: false,
+  expired: false,
+  expectancyR: true,
+  profitFactor: true,
+  totalPnl: true,
+  netUsd: true,
+  totalR: true,
+  maxDrawdown: false,
+  noEntry: false,
+};
+
+export const ALL_TUNE_METRICS: TuneMetric[] = [
+  'closed',
+  'winRate',
+  'wins',
+  'losses',
+  'expired',
+  'expectancyR',
+  'profitFactor',
+  'totalPnl',
+  'netUsd',
+  'totalR',
+  'maxDrawdown',
+  'noEntry',
+];
+
+/** Sensible default: money + R + win rate + drawdown (not raw counts alone). */
+export const DEFAULT_TUNE_METRICS: TuneMetric[] = [
+  'netUsd',
+  'totalR',
+  'expectancyR',
+  'winRate',
+  'profitFactor',
+  'maxDrawdown',
+];
 
 export interface SideScore {
   pick: SidePick | 'byClass';
@@ -11,83 +65,155 @@ export interface SideScore {
   wins: number;
   losses: number;
   expired: number;
+  open: number;
+  noEntry: number;
+  winRate: number; // 0..100 among WIN+LOSS
+  expectancyR: number;
+  profitFactor: number;
+  totalPnl: number;
   netUsd: number;
   totalR: number;
-  winRate: number; // 0..1 among closed that are WIN or LOSS (expired count in closed but not in WR denom if only W/L — we use wins/closed for simplicity)
+  maxDrawdown: number;
+  /** composite rank-sum under the active metric set (lower = better) */
+  rankSum: number;
 }
 
 export interface BucketTune {
   key: DayClass | 'DEAD';
-  /** recommended pick for this bucket */
   best: SidePick | DeadPick;
-  /** all candidates ranked best → worst */
   ranked: SideScore[];
-  /** how many FINAL signals fell in this bucket */
   signals: number;
-  /** true when sample is too small to trust */
   weak: boolean;
 }
 
 export interface AutoTuneResult {
   selection: PowerMixConfig['selection'];
   buckets: BucketTune[];
-  /** overall mix score under the recommended selection (closed only) */
   overall: SideScore;
   mode: MixMode;
-  /** signals considered (FINAL only) */
   totalSignals: number;
+  metricsUsed: TuneMetric[];
 }
 
-const MIN_CLOSED = 3; // below this the bucket is marked weak; still picks best available
-const CLOSED = (t: MixTrade) => t.status === 'WIN' || t.status === 'LOSS' || t.status === 'EXPIRED';
+const MIN_CLOSED = 3;
+const isClosed = (t: MixTrade) => t.status === 'WIN' || t.status === 'LOSS' || t.status === 'EXPIRED';
 
 function scoreTrades(trades: MixTrade[], pick: SidePick | 'byClass'): SideScore {
-  const closed = trades.filter(CLOSED);
-  const wins = closed.filter((t) => t.status === 'WIN').length;
-  const losses = closed.filter((t) => t.status === 'LOSS').length;
-  const expired = closed.filter((t) => t.status === 'EXPIRED').length;
-  const netUsd = closed.reduce((s, t) => s + (t.netUsd ?? 0), 0);
-  const totalR = closed.reduce((s, t) => s + (t.r ?? 0), 0);
-  const winRate = closed.length ? wins / closed.length : 0;
-  return { pick, closed: closed.length, wins, losses, expired, netUsd, totalR, winRate };
+  const closed = trades.filter(isClosed).sort((a, b) => a.atMs - b.atMs);
+  const wins = closed.filter((t) => t.status === 'WIN');
+  const losses = closed.filter((t) => t.status === 'LOSS');
+  const expired = closed.filter((t) => t.status === 'EXPIRED');
+  const decided = wins.length + losses.length;
+  const winRate = decided > 0 ? (wins.length / decided) * 100 : 0;
+
+  const pnlPct = (t: MixTrade) => t.pnlPct ?? 0;
+  const rOf = (t: MixTrade) => t.r ?? 0;
+  const totalPnl = closed.reduce((s, t) => s + pnlPct(t), 0);
+  const totalR = closed.reduce((s, t) => s + rOf(t), 0);
+  const expectancyR = closed.length ? totalR / closed.length : 0;
+  const grossWin = closed.reduce((s, t) => s + Math.max(0, pnlPct(t)), 0);
+  const grossLoss = Math.abs(closed.reduce((s, t) => s + Math.min(0, pnlPct(t)), 0));
+  const profitFactor = grossLoss > 0 ? grossWin / grossLoss : grossWin > 0 ? 999 : 0;
+
+  const usd = closed.map((t) => t.netUsd).filter((v): v is number => v !== null);
+  const netUsd = usd.reduce((s, v) => s + v, 0);
+  let eq = 0, peak = 0, dd = 0;
+  for (const t of closed) {
+    eq += t.netUsd ?? 0;
+    peak = Math.max(peak, eq);
+    dd = Math.max(dd, peak - eq);
+  }
+
+  return {
+    pick,
+    closed: closed.length,
+    wins: wins.length,
+    losses: losses.length,
+    expired: expired.length,
+    open: trades.filter((t) => t.status === 'OPEN').length,
+    noEntry: trades.filter((t) => t.status === 'NO_ENTRY').length,
+    winRate,
+    expectancyR,
+    profitFactor,
+    totalPnl,
+    netUsd,
+    totalR,
+    maxDrawdown: dd,
+    rankSum: 0,
+  };
 }
 
-/** Higher is better. none with 0 closed scores 0 (neutral baseline). */
-function better(a: SideScore, b: SideScore): number {
-  if (a.netUsd !== b.netUsd) return a.netUsd - b.netUsd;
-  if (a.totalR !== b.totalR) return a.totalR - b.totalR;
-  if (a.winRate !== b.winRate) return a.winRate - b.winRate;
-  // prefer more evidence when tied
-  return a.closed - b.closed;
-}
-
-function rankPicks(candidates: SideScore[]): SideScore[] {
-  return [...candidates].sort((a, b) => better(b, a));
-}
-
-function pickBest(ranked: SideScore[]): SideScore {
-  // If best has negative expectancy and "none" exists with 0, prefer none when best netUsd < 0
-  const best = ranked[0];
-  const none = ranked.find((x) => x.pick === 'none');
-  if (best && none && best.netUsd < 0 && none.netUsd >= best.netUsd) return none;
-  return best;
+function metricValue(s: SideScore, m: TuneMetric): number {
+  switch (m) {
+    case 'closed': return s.closed;
+    case 'winRate': return s.winRate;
+    case 'wins': return s.wins;
+    case 'losses': return s.losses;
+    case 'expired': return s.expired;
+    case 'expectancyR': return s.expectancyR;
+    case 'profitFactor': return s.profitFactor === Infinity ? 999 : s.profitFactor;
+    case 'totalPnl': return s.totalPnl;
+    case 'netUsd': return s.netUsd;
+    case 'totalR': return s.totalR;
+    case 'maxDrawdown': return s.maxDrawdown;
+    case 'noEntry': return s.noEntry;
+  }
 }
 
 /**
- * Optimise only `cfg.selection` using historical closed trades.
- * Class buckets use non-dead FINAL signals of that class.
- * DEAD bucket uses all FINAL dead-hours signals; `byClass` is scored with the class picks already chosen.
+ * Rank-sum scoring: for each selected metric, rank candidates (0 = best).
+ * Lower rankSum wins. Ties broken by netUsd then totalR.
  */
+function rankCandidates(candidates: SideScore[], metrics: TuneMetric[]): SideScore[] {
+  const metricsUse = metrics.length ? metrics : DEFAULT_TUNE_METRICS;
+  const n = candidates.length;
+  const rankSum = new Array(n).fill(0);
+
+  for (const m of metricsUse) {
+    const higher = METRIC_HIGHER_BETTER[m];
+    const vals = candidates.map((c) => metricValue(c, m));
+    // rank: best gets 0, worst gets n-1 (stable on ties: average rank not needed — same rank ok)
+    const order = vals
+      .map((v, i) => ({ v, i }))
+      .sort((a, b) => (higher ? b.v - a.v : a.v - b.v));
+    order.forEach((o, place) => {
+      rankSum[o.i] += place;
+    });
+  }
+
+  const scored = candidates.map((c, i) => ({ ...c, rankSum: rankSum[i] }));
+  scored.sort((a, b) => {
+    if (a.rankSum !== b.rankSum) return a.rankSum - b.rankSum;
+    if (a.netUsd !== b.netUsd) return b.netUsd - a.netUsd;
+    return b.totalR - a.totalR;
+  });
+  return scored;
+}
+
+function pickBest(ranked: SideScore[]): SideScore {
+  const best = ranked[0];
+  const none = ranked.find((x) => x.pick === 'none');
+  // If the winner is still clearly losing money and "none" is available, prefer sitting out
+  if (best && none && best.pick !== 'none' && best.netUsd < 0 && best.expectancyR < 0) {
+    return none;
+  }
+  return best;
+}
+
 export function autoTuneSelection(
   rows: MixRow[],
   tradesOf: (row: MixRow) => TradePair,
   mode: MixMode,
   baseCfg: PowerMixConfig,
+  metrics: TuneMetric[] = DEFAULT_TUNE_METRICS,
 ): AutoTuneResult {
-  const finalRows = rows.filter((r) => dayOf(r, mode).state === 'FINAL' && dayOf(r, mode).dayClass);
+  const metricsUse = metrics.length ? metrics : DEFAULT_TUNE_METRICS;
+  const finalRows = rows.filter((r) => {
+    const d = dayOf(r, mode);
+    return d.state === 'FINAL' && d.dayClass;
+  });
 
-  // ---- per day-class (non-dead) ----
-  const classPicks: Record<DayClass, SidePick> = { ...baseCfg.selection } as Record<DayClass, SidePick>;
+  const classPicks = { ...baseCfg.selection } as Record<DayClass, SidePick>;
   const buckets: BucketTune[] = [];
 
   for (const c of DAY_CLASSES) {
@@ -102,12 +228,10 @@ export function autoTuneSelection(
       orig.push(tp.original);
       rev.push(tp.reverse);
     }
-    const ranked = rankPicks([
-      scoreTrades(orig, 'original'),
-      scoreTrades(rev, 'reverse'),
-      scoreTrades([], 'none'), // baseline: take nothing → 0 PnL
-    ]);
-    // If both sides are negative, none (0) wins via pickBest
+    const ranked = rankCandidates(
+      [scoreTrades(orig, 'original'), scoreTrades(rev, 'reverse'), scoreTrades([], 'none')],
+      metricsUse,
+    );
     const best = pickBest(ranked);
     const chosen = (best.pick === 'byClass' ? 'none' : best.pick) as SidePick;
     classPicks[c] = chosen;
@@ -116,11 +240,10 @@ export function autoTuneSelection(
       best: chosen,
       ranked,
       signals: bucketRows.length,
-      weak: Math.max(ranked[0]?.closed ?? 0, ranked[1]?.closed ?? 0) < MIN_CLOSED,
+      weak: Math.max(ranked.find((x) => x.pick === 'original')?.closed ?? 0, ranked.find((x) => x.pick === 'reverse')?.closed ?? 0) < MIN_CLOSED,
     });
   }
 
-  // ---- dead hours ----
   const deadRows = finalRows.filter((r) => dayOf(r, mode).deadHours);
   const deadOrig: MixTrade[] = [];
   const deadRev: MixTrade[] = [];
@@ -134,12 +257,15 @@ export function autoTuneSelection(
     if (p === 'original') deadByClass.push(tp.original);
     else if (p === 'reverse') deadByClass.push(tp.reverse);
   }
-  const deadRanked = rankPicks([
-    scoreTrades(deadOrig, 'original'),
-    scoreTrades(deadRev, 'reverse'),
-    scoreTrades(deadByClass, 'byClass'),
-    scoreTrades([], 'none'),
-  ]);
+  const deadRanked = rankCandidates(
+    [
+      scoreTrades(deadOrig, 'original'),
+      scoreTrades(deadRev, 'reverse'),
+      scoreTrades(deadByClass, 'byClass'),
+      scoreTrades([], 'none'),
+    ],
+    metricsUse,
+  );
   const deadBest = pickBest(deadRanked);
   const deadPick = deadBest.pick as DeadPick;
 
@@ -148,7 +274,7 @@ export function autoTuneSelection(
     best: deadPick,
     ranked: deadRanked,
     signals: deadRows.length,
-    weak: Math.max(deadRanked[0]?.closed ?? 0, deadRanked[1]?.closed ?? 0) < MIN_CLOSED,
+    weak: Math.max(deadRanked.find((x) => x.pick === 'original')?.closed ?? 0, deadRanked.find((x) => x.pick === 'reverse')?.closed ?? 0) < MIN_CLOSED,
   });
 
   const selection: PowerMixConfig['selection'] = {
@@ -160,7 +286,6 @@ export function autoTuneSelection(
     DEAD: deadPick,
   };
 
-  // overall under recommended selection
   const mixTrades: MixTrade[] = [];
   for (const r of finalRows) {
     const d = dayOf(r, mode);
@@ -174,8 +299,9 @@ export function autoTuneSelection(
   return {
     selection,
     buckets,
-    overall: scoreTrades(mixTrades, 'original'), // pick label unused
+    overall: scoreTrades(mixTrades, 'original'),
     mode,
     totalSignals: finalRows.length,
+    metricsUsed: metricsUse,
   };
 }
