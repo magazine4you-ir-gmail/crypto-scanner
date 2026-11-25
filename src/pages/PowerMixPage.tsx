@@ -290,6 +290,9 @@ export function PowerMixPage() {
             personal={personal !== null}
             onSave={(c) => { saveLocalOverride(c); setPersonal(c); }}
             onReset={() => { clearLocalOverride(); setPersonal(null); }}
+            rows={dateRows}
+            tradesOf={tradesOf}
+            mixMode={mixMode}
           />
 
           <PowerMixLiveCard live={live} cfg={cfg} />
