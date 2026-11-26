@@ -70,6 +70,18 @@ const EXCLUDED_BASES = new Set([
 // ---------------------------------------------------------------------
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
+/**
+ * Normalize legacy timeframe values at API and engine boundaries.
+ */
+function engineTimeframe(timeframe: string): string {
+  return timeframe.replace(/^(\d+)M$/, "$1m");
+}
+
+function binanceInterval(timeframe: string): string {
+  return engineTimeframe(timeframe);
+}
+
+
 async function fetchJson(url: string, headers: Record<string, string> = {}, tries = 3): Promise<unknown> {
   let lastError: Error = new Error("request failed");
   for (let attempt = 0; attempt < tries; attempt++) {
@@ -296,7 +308,8 @@ async function getFuturesPerps(): Promise<Set<string> | null> {
 // ---------------------------------------------------------------------
 // Scan
 // ---------------------------------------------------------------------
-async function fetchClosedCandles(symbol: string, interval: string): Promise<Candle[]> {
+async function fetchClosedCandles(symbol: string, timeframe: string): Promise<Candle[]> {
+  const interval = binanceInterval(timeframe);
   const rows = (await fetchJson(
     `${BINANCE_BASE}/api/v3/klines?symbol=${symbol}&interval=${interval}&limit=${CANDLE_LIMIT}`,
   )) as unknown[][];
@@ -358,7 +371,7 @@ async function evaluateOpenOutcomes(
       try {
         const start = Math.min(...outcomes.map(baseTs)) + 1;
         const rows = (await fetchJson(
-          `${BINANCE_BASE}/api/v3/klines?symbol=${symbol}&interval=${tf}&startTime=${start}&limit=1000`,
+          `${BINANCE_BASE}/api/v3/klines?symbol=${symbol}&interval=${binanceInterval(tf)}&startTime=${start}&limit=1000`,
         )) as unknown[][];
         const candles = closedCandles(parseKlines(rows));
         for (const o of outcomes) {
@@ -370,7 +383,7 @@ async function evaluateOpenOutcomes(
               entry: Number(o.price_at_signal),
               stop: Number(o.stop_loss),
               target: Number(o.target1),
-              maxBars: EXPIRY_BARS[tf] ?? 40,
+              maxBars: EXPIRY_BARS[engineTimeframe(tf)] ?? 40,
             },
             after,
           );
@@ -588,7 +601,7 @@ async function fetchCandlesAfter(symbol: string, tf: string, startTime: number):
   let cursor = startTime;
   for (let hop = 0; hop < 5; hop++) {
     const rows = (await fetchJson(
-      `${BINANCE_BASE}/api/v3/klines?symbol=${symbol}&interval=${tf}&startTime=${cursor}&limit=1000`,
+      `${BINANCE_BASE}/api/v3/klines?symbol=${symbol}&interval=${binanceInterval(tf)}&startTime=${cursor}&limit=1000`,
     )) as unknown[][];
     if (!rows?.length) break;
     const batch = closedCandles(parseKlines(rows));
@@ -661,7 +674,7 @@ async function evaluateOpenReverseOutcomes(
                 entry: Number(o.price_at_signal),
                 stop: Number(o.stop_loss),
                 target: Number(o.target1),
-                maxBars: EXPIRY_BARS[tf] ?? 40,
+                maxBars: EXPIRY_BARS[engineTimeframe(tf)] ?? 40,
               },
               after,
             );
@@ -751,7 +764,7 @@ Deno.serve(async (req: Request) => {
     const prev = new Map<string, { signal_type: string; signal_since: string; scanned_at: string }>();
     for (const p of previous ?? []) prev.set(`${p.symbol}|${p.timeframe}`, p);
 
-    const boundaries = new Map(timeframes.map((tf) => [tf, lastBoundary(tf, t0)]));
+    const boundaries = new Map(timeframes.map((tf) => [tf, lastBoundary(engineTimeframe(tf), t0)]));
     const tasks = timeframes.flatMap((tf) =>
       coins
         .map((coin) => ({ coin, tf }))
@@ -780,7 +793,7 @@ Deno.serve(async (req: Request) => {
             notReady++;
             return;
           }
-          const r: CoreAnalysis | null = analyzeCore(candles, { timeframe: tf });
+          const r: CoreAnalysis | null = analyzeCore(candles, { timeframe: engineTimeframe(tf) });
           if (!r) {
             failed++;
             return;
@@ -868,7 +881,7 @@ Deno.serve(async (req: Request) => {
       const ev = await evaluateOpenOutcomes(supabase, t0);
       outcomesClosed = ev.closed;
       const recent = freshActionable.filter(
-        (r) => t0 - Date.parse(r.candle_close_time) <= 2 * timeframeMs(r.timeframe),
+        (r) => t0 - Date.parse(r.candle_close_time) <= 2 * timeframeMs(engineTimeframe(r.timeframe)),
       );
       outcomesOpened = await registerNewOutcomes(supabase, recent, nowIso);
     } catch (e) {

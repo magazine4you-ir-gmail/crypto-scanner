@@ -35,6 +35,9 @@ export function ReversePlusPage() {
   const openEvaluation = useCallback((e: PlusEvaluation) => {
     navigate(`/reverse-plus/signal/${encodeURIComponent(e.reverse_outcome_id)}`);
   }, [navigate]);
+  const openBacktest = useCallback((b: PlusBacktest) => {
+    navigate(`/reverse-plus/signal/${encodeURIComponent(b.reverse_outcome_id)}`);
+  }, [navigate]);
   const [tab, setTab] = useState<Tab>('analysis');
   const [settings, setSettings] = useState<PlusSettingsRow | null>(null);
   const [backtests, setBacktests] = useState<PlusBacktest[]>([]);
@@ -102,7 +105,7 @@ export function ReversePlusPage() {
   const tabs: { key: Tab; label: string }[] = [
     { key: 'analysis', label: 'مرکز تحلیل' },
     { key: 'signals', label: t('rpSignals') },
-    { key: 'history', label: `بک‌تست تاریخی (${historicalEvals.length})` },
+    { key: 'history', label: `بک‌تست تاریخی (${backtests.length})` },
     { key: 'trades', label: t('rpTrades') },
     { key: 'performance', label: t('rpPerformance') },
     { key: 'settings', label: t('rpSettings') },
@@ -117,7 +120,7 @@ export function ReversePlusPage() {
         <>
           {tab === 'analysis' && <ReversePlusAnalysis backtests={backtests} evals={historyEvals} liveEvals={evals} trades={trades} cfg={config} />}
           {tab === 'signals' && <SignalsTab evals={evals} onOpen={openEvaluation} />}
-          {tab === 'history' && <HistoryTab evals={historicalEvals} publicSince={config?.public_since ?? null} onOpen={openEvaluation} />}
+          {tab === 'history' && <BacktestHistoryTab backtests={backtests} onOpen={openBacktest} />}
           {tab === 'trades' && <TradesTab trades={trades} evals={evals} settings={settings} userId={user!.id} onChanged={load} />}
           {tab === 'performance' && <PerformanceTab trades={trades} reverse={reverse} />}
           {tab === 'settings' && <SettingsTab settings={settings} userId={user!.id} onSaved={setSettings} />}
@@ -130,64 +133,104 @@ export function ReversePlusPage() {
 
 
 // ------------------------------------------------------------------------------------------------
-// Historical backtest: read-only SIGNAL_TIME evaluations created before Reverse Plus activation.
-// These rows are deliberately kept separate from LIVE signals and actual-trade entry selection.
-function HistoryTab({ evals, publicSince, onOpen }: { evals: PlusEvaluation[]; publicSince: string | null; onOpen: (e: PlusEvaluation) => void }) {
+// Historical backtest: read-only rows from the central reverse_plus_backtests table.
+function BacktestHistoryTab({
+  backtests,
+  onOpen,
+}: {
+  backtests: PlusBacktest[];
+  onOpen: (b: PlusBacktest) => void;
+}) {
   const { lang } = useSettings();
   const [query, setQuery] = useState('');
   const [timeframe, setTimeframe] = useState('ALL');
-  const [status, setStatus] = useState('ALL');
+  const [outcome, setOutcome] = useState('ALL');
   const [page, setPage] = useState(0);
   const pageSize = 30;
 
   const timeframes = useMemo(
-    () => Array.from(new Set(evals.map((e) => e.timeframe).filter(Boolean))).sort(),
-    [evals]
+    () => Array.from(new Set(backtests.map((b) => b.timeframe).filter(Boolean))).sort(),
+    [backtests]
   );
 
   const filtered = useMemo(() => {
     const q = query.trim().toUpperCase();
-    return evals.filter((e) => {
-      const matchesQuery = !q || e.symbol.toUpperCase().includes(q);
-      const matchesTimeframe = timeframe === 'ALL' || e.timeframe === timeframe;
-      const matchesStatus = status === 'ALL' || e.entry_status === status;
-      return matchesQuery && matchesTimeframe && matchesStatus;
+    return backtests.filter((b) => {
+      const matchesQuery = !q || b.symbol.toUpperCase().includes(q);
+      const matchesTimeframe = timeframe === 'ALL' || b.timeframe === timeframe;
+      const matchesOutcome = outcome === 'ALL' || b.outcome === outcome;
+      return matchesQuery && matchesTimeframe && matchesOutcome;
     });
-  }, [evals, query, timeframe, status]);
+  }, [backtests, query, timeframe, outcome]);
+
+  const counts = useMemo(() => ({
+    WIN: backtests.filter((b) => b.outcome === 'WIN').length,
+    LOSS: backtests.filter((b) => b.outcome === 'LOSS').length,
+    NO_ENTRY: backtests.filter((b) => b.outcome === 'NO_ENTRY').length,
+    EXPIRED: backtests.filter((b) => b.outcome === 'EXPIRED').length,
+    OTHER: backtests.filter((b) => ['BREAKEVEN', 'AMBIGUOUS', 'UNKNOWN'].includes(b.outcome)).length,
+  }), [backtests]);
 
   const pageCount = Math.max(1, Math.ceil(filtered.length / pageSize));
   const safePage = Math.min(page, pageCount - 1);
   const visible = filtered.slice(safePage * pageSize, (safePage + 1) * pageSize);
-
-  const statusCounts = useMemo(() => ({
-    READY: evals.filter((e) => e.entry_status === 'READY').length,
-    APPROACHING: evals.filter((e) => e.entry_status === 'APPROACHING').length,
-    WAITING: evals.filter((e) => e.entry_status === 'WAITING').length,
-    INVALID: evals.filter((e) => e.entry_status === 'INVALID').length,
-    EXPIRED: evals.filter((e) => e.entry_status === 'EXPIRED').length,
-  }), [evals]);
-
   const resetPage = () => setPage(0);
+  const price = (v: number | null) => v === null ? '—' : formatPrice(v, lang);
+
+  const outcomeLabel: Record<string, string> = {
+    WIN: 'برد · هدف',
+    LOSS: 'باخت · حد ضرر',
+    BREAKEVEN: 'سر‌به‌سر',
+    NO_ENTRY: 'بدون ورود',
+    EXPIRED: 'منقضی',
+    AMBIGUOUS: 'نتیجه مبهم',
+    UNKNOWN: 'نامشخص',
+  };
+
+  const outcomeTone: Record<string, string> = {
+    WIN: 'bg-success-500/20 text-success-400',
+    LOSS: 'bg-error-500/20 text-error-400',
+    BREAKEVEN: 'bg-surface-200 text-slate-300',
+    NO_ENTRY: 'bg-surface-200 text-slate-300',
+    EXPIRED: 'bg-surface-200 text-slate-400',
+    AMBIGUOUS: 'bg-warning-500/20 text-warning-400',
+    UNKNOWN: 'bg-surface-200 text-slate-400',
+  };
 
   return (
     <div className="space-y-4">
       <Card className="!p-4 space-y-3">
         <div className="flex items-start justify-between gap-3 flex-wrap">
           <div>
-            <h2 className="font-semibold text-slate-100">بک‌تست تاریخی سیگنال‌های معکوس</h2>
+            <h2 className="font-semibold text-slate-100">نتایج بک‌تست تاریخی سیگنال‌های معکوس</h2>
             <p className="text-xs text-slate-400 mt-1 leading-relaxed">
-              این سوابق فقط برای ارزیابی گذشته هستند؛ معامله PAPER یا LIVE از آن‌ها ساخته نمی‌شود.
+              نتایج ثبت‌شده موتور بک‌تست مرکزی؛ این سوابق به‌تنهایی معامله PAPER یا LIVE ایجاد نمی‌کنند.
             </p>
           </div>
-          <Chip>{evals.length.toLocaleString(lang === 'fa' ? 'fa-IR' : 'en-US')} رکورد تاریخی</Chip>
+          <Chip>{backtests.length.toLocaleString(lang === 'fa' ? 'fa-IR' : 'en-US')} رکورد</Chip>
         </div>
 
         <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
-          <div className="rounded-lg bg-surface-100 p-2"><p className="text-[10px] text-slate-500">مجموع</p><p className="text-sm font-semibold text-slate-100">{evals.length}</p></div>
-          <div className="rounded-lg bg-surface-100 p-2"><p className="text-[10px] text-slate-500">آماده</p><p className="text-sm font-semibold text-success-400">{statusCounts.READY}</p></div>
-          <div className="rounded-lg bg-surface-100 p-2"><p className="text-[10px] text-slate-500">نزدیک ورود</p><p className="text-sm font-semibold text-warning-400">{statusCounts.APPROACHING}</p></div>
-          <div className="rounded-lg bg-surface-100 p-2"><p className="text-[10px] text-slate-500">نامعتبر</p><p className="text-sm font-semibold text-error-400">{statusCounts.INVALID}</p></div>
-          <div className="rounded-lg bg-surface-100 p-2"><p className="text-[10px] text-slate-500">منقضی / منتظر</p><p className="text-sm font-semibold text-slate-300">{statusCounts.EXPIRED + statusCounts.WAITING}</p></div>
+          <div className="rounded-lg bg-surface-100 p-2">
+            <p className="text-[10px] text-slate-500">مجموع</p>
+            <p className="text-sm font-semibold text-slate-100">{backtests.length}</p>
+          </div>
+          <div className="rounded-lg bg-surface-100 p-2">
+            <p className="text-[10px] text-slate-500">برد</p>
+            <p className="text-sm font-semibold text-success-400">{counts.WIN}</p>
+          </div>
+          <div className="rounded-lg bg-surface-100 p-2">
+            <p className="text-[10px] text-slate-500">باخت</p>
+            <p className="text-sm font-semibold text-error-400">{counts.LOSS}</p>
+          </div>
+          <div className="rounded-lg bg-surface-100 p-2">
+            <p className="text-[10px] text-slate-500">بدون ورود</p>
+            <p className="text-sm font-semibold text-slate-300">{counts.NO_ENTRY}</p>
+          </div>
+          <div className="rounded-lg bg-surface-100 p-2">
+            <p className="text-[10px] text-slate-500">منقضی / سایر</p>
+            <p className="text-sm font-semibold text-slate-300">{counts.EXPIRED + counts.OTHER}</p>
+          </div>
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
@@ -209,48 +252,75 @@ function HistoryTab({ evals, publicSince, onOpen }: { evals: PlusEvaluation[]; p
           </select>
           <select
             className="input-field w-full text-sm"
-            value={status}
-            onChange={(e) => { setStatus(e.target.value); resetPage(); }}
-            aria-label="فیلتر وضعیت"
+            value={outcome}
+            onChange={(e) => { setOutcome(e.target.value); resetPage(); }}
+            aria-label="فیلتر نتیجه بک‌تست"
           >
-            <option value="ALL">همه وضعیت‌ها</option>
-            <option value="READY">آماده ورود</option>
-            <option value="APPROACHING">نزدیک ورود</option>
-            <option value="WAITING">در انتظار</option>
-            <option value="INVALID">نامعتبر</option>
+            <option value="ALL">همه نتایج</option>
+            <option value="WIN">برد</option>
+            <option value="LOSS">باخت</option>
+            <option value="BREAKEVEN">سر‌به‌سر</option>
+            <option value="NO_ENTRY">بدون ورود</option>
             <option value="EXPIRED">منقضی</option>
+            <option value="AMBIGUOUS">نتیجه مبهم</option>
+            <option value="UNKNOWN">نامشخص</option>
           </select>
         </div>
 
         <div className="flex items-center justify-between gap-2 text-xs text-slate-400">
-          <span>{filtered.length.toLocaleString(lang === 'fa' ? 'fa-IR' : 'en-US')} نتیجه از {evals.length.toLocaleString(lang === 'fa' ? 'fa-IR' : 'en-US')}</span>
+          <span>
+            {filtered.length.toLocaleString(lang === 'fa' ? 'fa-IR' : 'en-US')} نتیجه از {backtests.length.toLocaleString(lang === 'fa' ? 'fa-IR' : 'en-US')}
+          </span>
           <button
             className="text-primary-400 disabled:text-slate-600"
-            onClick={() => { setQuery(''); setTimeframe('ALL'); setStatus('ALL'); setPage(0); }}
-            disabled={!query && timeframe === 'ALL' && status === 'ALL'}
+            onClick={() => { setQuery(''); setTimeframe('ALL'); setOutcome('ALL'); setPage(0); }}
+            disabled={!query && timeframe === 'ALL' && outcome === 'ALL'}
           >
             پاک‌کردن فیلترها
           </button>
         </div>
-        {publicSince && (
-          <p className="text-[10px] text-slate-500">
-            مرز تفکیک سوابق تاریخی: پیش از شروع پردازش مرکزی Reverse Plus (برای همه کاربران یکسان است)
-          </p>
-        )}
       </Card>
 
       {visible.length === 0 ? (
         <EmptyState message="با فیلترهای انتخاب‌شده رکوردی پیدا نشد." />
       ) : (
         <div className="space-y-3">
-          {visible.map((e) => (
-            <div key={e.id} className="space-y-1">
-              <EvalCard e={e} onOpen={onOpen} />
-              <div className="px-1 flex justify-between gap-2 text-[10px] text-slate-500">
-                <span>زمان سیگنال: <TimeStamp value={e.signal_at} compact /></span>
-                <span>تاریخی · فقط جهت بک‌تست</span>
+          {visible.map((b) => (
+            <Card key={b.id} className="!p-4 space-y-3">
+              <div className="flex items-center justify-between gap-2 flex-wrap">
+                <div className="flex items-center gap-2 min-w-0">
+                  <span className="font-semibold text-slate-100">{b.symbol}</span>
+                  <Chip tone={b.side === 'BUY' ? 'bg-success-500/20 text-success-400' : 'bg-error-500/20 text-error-400'}>
+                    {b.side === 'BUY' ? 'LONG' : 'SHORT'}
+                  </Chip>
+                  <Chip>{b.timeframe}</Chip>
+                </div>
+                <Chip tone={outcomeTone[b.outcome] ?? outcomeTone.UNKNOWN}>
+                  {outcomeLabel[b.outcome] ?? b.outcome}
+                </Chip>
               </div>
-            </div>
+
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                <Metric label="قیمت ورود برنامه" value={price(b.entry_level)} />
+                <Metric label="حد ضرر" value={price(b.stop_loss)} />
+                <Metric label="هدف" value={price(b.take_profit)} />
+                <Metric label="قیمت ورود واقعی" value={price(b.entry_price)} />
+                <Metric label="قیمت خروج" value={price(b.exit_price)} />
+                <Metric label="دلیل خروج" value={b.exit_reason ?? '—'} />
+                <Metric label="کندل تا ورود" value={b.bars_to_entry ?? '—'} />
+                <Metric label="مدت نگهداری (کندل)" value={b.bars_held ?? '—'} />
+              </div>
+
+              <div className="flex items-center justify-between gap-2 flex-wrap text-[11px] text-slate-500">
+                <span>زمان سیگنال: <TimeStamp value={b.signal_at ?? b.signal_close_time} compact /></span>
+                <span>وضعیت استراتژی: {b.strategy_status ?? '—'}</span>
+                <span>دلیل نتیجه: {b.reason || '—'}</span>
+              </div>
+
+              <button className="btn-secondary text-xs" onClick={() => onOpen(b)}>
+                نمودار و تحلیل کامل ←
+              </button>
+            </Card>
           ))}
         </div>
       )}
@@ -266,7 +336,6 @@ function HistoryTab({ evals, publicSince, onOpen }: { evals: PlusEvaluation[]; p
   );
 }
 
-// ------------------------------------------------------------------------------------------------
 function SignalsTab({ evals, onOpen }: { evals: PlusEvaluation[]; onOpen: (e: PlusEvaluation) => void }) {
   const { t } = useSettings();
   if (evals.length === 0) return <EmptyState message={t('rpNoData')} />;

@@ -160,7 +160,7 @@ function evaluationRow(
   const e = a.entry;
   const t = a.plan?.totals ?? null;
   return {
-    user_id: userId, owner_key: CENTRAL_OWNER_KEY, source: "CENTRAL", reverse_outcome_id: rev.id, origin_outcome_id: rev.origin_outcome_id, symbol: rev.symbol,
+    user_id: userId, source: "CENTRAL", reverse_outcome_id: rev.id, origin_outcome_id: rev.origin_outcome_id, symbol: rev.symbol,
     timeframe: rev.timeframe, side: rev.signal_type, eval_kind: kind, as_of_close_time: new Date(asOfMs).toISOString(),
     current_price: str(price), zone_low: str(e.zoneLow), zone_high: str(e.zoneHigh),
     reverse_entry: str(dec(rev.price_at_signal)), stop_loss: str(dec(rev.stop_loss)), take_profit: str(dec(rev.target1)),
@@ -253,7 +253,7 @@ Deno.serve(async (req: Request) => {
     const tradeByKey = new Map<string, Row>();
     for (let i = 0; i < revIds.length; i += 100) {
       const chunk = revIds.slice(i, i + 100);
-      const { data: ev } = await supabase.from("reverse_plus_evaluations").select("user_id, reverse_outcome_id, eval_kind, recommended_entry, entry_status").eq("eval_kind", "SIGNAL_TIME").eq("owner_key", CENTRAL_OWNER_KEY).eq("source", "CENTRAL").in("reverse_outcome_id", chunk).is("user_id", null);
+      const { data: ev } = await supabase.from("reverse_plus_evaluations").select("user_id, reverse_outcome_id, eval_kind, recommended_entry, entry_status").eq("eval_kind", "SIGNAL_TIME").eq("owner_key", CENTRAL_OWNER_KEY).in("source", ["CENTRAL", "LEGACY_USER_COPY"]).in("reverse_outcome_id", chunk).is("user_id", null);
       for (const e of ev ?? []) {
         evalKey.add(`${CENTRAL_OWNER_KEY}|${e.reverse_outcome_id}`);
         evalInfo.set(String(e.reverse_outcome_id), { entry: e.recommended_entry === null ? null : String(e.recommended_entry), status: String(e.entry_status) });
@@ -404,7 +404,7 @@ Deno.serve(async (req: Request) => {
             if (!historical && a.plan?.ok && a.status !== "INVALID" && a.status !== "EXPIRED" && !tradeByKey.has(key)) {
               const steps = a.plan.steps;
               const tradeRow: Row = {
-                user_id: null, owner_key: CENTRAL_OWNER_KEY, mode: "PAPER", reverse_outcome_id: rev.id, origin_outcome_id: rev.origin_outcome_id,
+                user_id: null, mode: "PAPER", reverse_outcome_id: rev.id, origin_outcome_id: rev.origin_outcome_id,
                 evaluation_id: evaluationId, symbol: rev.symbol, timeframe: rev.timeframe, side: rev.signal_type,
                 quality_score: a.quality.score, recommended_entry: str(a.entry.recommendedEntry), stop_loss: str(dec(rev.stop_loss)),
                 take_profit: str(dec(rev.target1)), leverage: str(s.leverage), margin_used: str(a.plan.totals?.margin ?? null),

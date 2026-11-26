@@ -190,7 +190,7 @@ export async function fetchEvaluations(kind: 'LIVE' | 'SIGNAL_TIME' = 'LIVE', li
     .select('*')
     .is('user_id', null) // central (public) rows: identical for every user
     .eq('owner_key', REVERSE_PLUS_CENTRAL_OWNER)
-    .eq('source', 'CENTRAL')
+    .in('source', ['CENTRAL', 'LEGACY_USER_COPY'])
     .eq('eval_kind', kind)
     .order('signal_at', { ascending: false })
     .limit(limit);
