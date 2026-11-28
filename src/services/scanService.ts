@@ -1,4 +1,5 @@
 import { supabase } from './supabaseClient';
+import { cachedRequest } from './requestCache';
 
 export type ScanSignalType = 'BUY' | 'SELL' | 'WAIT' | 'NO_TRADE';
 
@@ -53,14 +54,27 @@ export interface ScanRunRow {
   error: string | null;
 }
 
-export async function fetchScanResults(): Promise<ScanResultRow[]> {
-  const { data, error } = await supabase
-    .from('scan_results')
-    .select('*')
-    .order('signal_since', { ascending: false })
-    .limit(1000);
-  if (error) throw new Error(error.message);
-  return (data ?? []) as ScanResultRow[];
+/** Every ScanResultRow field (the table also has `run_id`, which no screen reads). */
+const SCAN_RESULT_COLS = 'id, symbol, base_asset, market_rank, timeframe, signal_type, bias, score, bull_score, bear_score, regime, trend, structure, risk_level, price, rsi, atr_pct, rel_volume, entry_low, entry_high, stop_loss, target1, target2, target3, risk_reward, shortable, candle_close_time, signal_since, scanned_at';
+
+/** The scan table is rewritten by the scheduled scan only; 60 s collapses remounts / double effects (use `force` after a new run). */
+export const SCAN_RESULTS_TTL_MS = 60_000;
+
+export async function fetchScanResults(opts: { force?: boolean } = {}): Promise<ScanResultRow[]> {
+  return cachedRequest('scan:results', SCAN_RESULTS_TTL_MS, async () => {
+    const { data, error } = await supabase
+      .from('scan_results')
+      .select(SCAN_RESULT_COLS)
+      .order('signal_since', { ascending: false })
+      .limit(1000);
+    if (error) throw new Error(error.message);
+    return (data ?? []) as unknown as ScanResultRow[];
+  }, { force: opts.force });
+}
+
+/** Identity of a scan run's state: it changes when a scan starts, and when it finishes. */
+export function scanRunSignature(run: Pick<ScanRunRow, 'id' | 'status' | 'finished_at'> | null): string {
+  return run ? `${run.id}|${run.status}|${run.finished_at ?? ''}` : 'none';
 }
 
 /** Newest BUY/SELL signals (used by the dashboard). */
@@ -76,12 +90,15 @@ export async function fetchRecentActionable(limit = 10): Promise<ScanResultRow[]
 }
 
 export async function fetchLatestScanRun(): Promise<ScanRunRow | null> {
-  const { data, error } = await supabase
-    .from('scan_runs')
-    .select('*')
-    .order('started_at', { ascending: false })
-    .limit(1)
-    .maybeSingle();
-  if (error) throw new Error(error.message);
-  return (data as ScanRunRow | null) ?? null;
+  // one tiny row; 10 s only de-duplicates concurrent callers (several widgets / double effects)
+  return cachedRequest('scan:latest-run', 10_000, async () => {
+    const { data, error } = await supabase
+      .from('scan_runs')
+      .select('*')
+      .order('started_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (error) throw new Error(error.message);
+    return (data as ScanRunRow | null) ?? null;
+  });
 }
