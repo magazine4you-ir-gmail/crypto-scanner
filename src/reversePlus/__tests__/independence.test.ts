@@ -77,11 +77,11 @@ describe('independence from the existing signal system', () => {
   });
 
   it('flag OFF leaves the navigation exactly as before (same array); flag ON adds one entry after Reverse Lab', () => {
-    const items = [{ key: 'dashboard', path: '/' }, { key: 'reverseLab', path: '/reverse-lab' }, { key: 'scalp', path: '/scalp' }];
+    const items = [{ key: 'dashboard', path: '/' }, { key: 'reverseLab', path: '/reverse-lab' }, { key: 'powerMix', path: '/power-mix' }];
     const entry = { key: 'reversePlus', path: '/reverse-plus' };
     expect(withReversePlusNav(items, false, entry)).toBe(items);
     const on = withReversePlusNav(items, true, entry);
-    expect(on.map((i) => i.key)).toEqual(['dashboard', 'reverseLab', 'reversePlus', 'scalp']);
+    expect(on.map((i) => i.key)).toEqual(['dashboard', 'reverseLab', 'reversePlus', 'powerMix']);
     expect(items).toHaveLength(3); // not mutated
     expect(isReversePlusEnabled({})).toBe(true);
     expect(isReversePlusEnabled({ VITE_REVERSE_PLUS_ENABLED: 'false' })).toBe(false);
