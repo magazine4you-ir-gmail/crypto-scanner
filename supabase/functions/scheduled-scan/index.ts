@@ -70,6 +70,19 @@ const EXCLUDED_BASES = new Set([
 // ---------------------------------------------------------------------
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
+/**
+ * Per-record problems can repeat for hundreds of symbols on every run. Print the first few (enough to diagnose) and only
+ * COUNT the rest; the caller reports the total once in its summary line. Real errors are never dropped silently.
+ */
+function sampledLogger(limit = 5) {
+  let n = 0;
+  return {
+    log(print: (...a: unknown[]) => void, ...args: unknown[]) { n++; if (n <= limit) print(...args); },
+    get count() { return n; },
+    get suppressed() { return Math.max(0, n - limit); },
+  };
+}
+
 async function fetchJson(url: string, headers: Record<string, string> = {}, tries = 3): Promise<unknown> {
   let lastError: Error = new Error("request failed");
   for (let attempt = 0; attempt < tries; attempt++) {
@@ -350,6 +363,7 @@ async function evaluateOpenOutcomes(
   }
 
   let closed = 0;
+  const evalErrors = sampledLogger();
   await mapPool(
     [...groups.entries()],
     CONCURRENCY,
@@ -392,11 +406,12 @@ async function evaluateOpenOutcomes(
           if (!upErr) closed++;
         }
       } catch (e) {
-        console.error(`evaluate ${key}:`, e instanceof Error ? e.message : String(e));
+        evalErrors.log(console.error, `evaluate ${key}:`, e instanceof Error ? e.message : String(e));
       }
     },
     t0 + EVAL_BUDGET_MS,
   );
+  if (evalErrors.count > 0) console.warn(`evaluate: ${evalErrors.count} symbol/timeframe group(s) failed (${evalErrors.suppressed} more not shown)`);
 
   return { checked: open.length, closed };
 }
@@ -478,6 +493,7 @@ async function registerNewOutcomes(
 async function backfillReverseOutcomes(supabase: SupabaseClient): Promise<number> {
   let created = 0;
   let offset = 0;
+  const invalidPlans = sampledLogger(3);
 
   for (let page = 0; page < REVERSE_MAX_PAGES; page++) {
     const { data: origins, error } = await supabase
@@ -525,7 +541,9 @@ async function backfillReverseOutcomes(supabase: SupabaseClient): Promise<number
       if (mirror) {
         rows.push(mirror);
       } else {
-        console.warn(
+        // the same invalid origins are met again on every run: print a few, count the rest
+        invalidPlans.log(
+          console.warn,
           `reverse skip invalid plan: ${o.symbol} ${o.timeframe} ${o.signal_type} entry=${o.price_at_signal} stop=${o.stop_loss} target=${o.target1}`,
         );
       }
@@ -544,7 +562,7 @@ async function backfillReverseOutcomes(supabase: SupabaseClient): Promise<number
     offset += REVERSE_PAGE;
   }
 
-  console.log(`reverse backfill created≈${created}`);
+  console.log(`reverse backfill created≈${created} skippedInvalid=${invalidPlans.count}`);
   return created;
 }
 
@@ -610,6 +628,7 @@ async function evaluateOpenReverseOutcomes(
 ): Promise<{ checked: number; closed: number }> {
   let checked = 0;
   let closed = 0;
+  const reverseEvalErrors = sampledLogger();
 
   for (let page = 0; page < REVERSE_MAX_PAGES; page++) {
     if (Date.now() > t0 + EVAL_BUDGET_MS) {
@@ -686,7 +705,7 @@ async function evaluateOpenReverseOutcomes(
             }
           }
         } catch (e) {
-          console.error(`evaluate reverse ${key}:`, e instanceof Error ? e.message : String(e));
+          reverseEvalErrors.log(console.error, `evaluate reverse ${key}:`, e instanceof Error ? e.message : String(e));
         }
       },
       t0 + EVAL_BUDGET_MS,
@@ -699,7 +718,7 @@ async function evaluateOpenReverseOutcomes(
     }
   }
 
-  console.log(`reverse evaluate checked=${checked} closed=${closed}`);
+  console.log(`reverse evaluate checked=${checked} closed=${closed} errors=${reverseEvalErrors.count}${reverseEvalErrors.suppressed ? ` (${reverseEvalErrors.suppressed} not shown)` : ""}`);
   return { checked, closed };
 }
 
