@@ -19,7 +19,6 @@ import { ProfilePage } from '@/pages/ProfilePage';
 import { LoadingSpinner } from '@/components/UI';
 import type { ReactNode } from 'react';
 import { SignalLabPage } from '@/pages/SignalLabPage';
-import { ScalpPage } from '@/pages/ScalpPage';
 import { ReverseLabPage } from '@/pages/ReverseLabPage';
 import { ReversePlusPage } from '@/pages/ReversePlusPage';
 import { ReversePlusSignalPage } from '@/pages/ReversePlusSignalPage';
@@ -80,7 +79,6 @@ function AppRoutes() {
       {isReversePlusEnabled() && <Route path="/reverse-plus" element={<AppRoute><ReversePlusPage /></AppRoute>} />}
       {isReversePlusEnabled() && <Route path="/reverse-plus/signal/:id" element={<AppRoute><ReversePlusSignalPage /></AppRoute>} />}
       <Route path="/power-mix" element={<AppRoute><PowerMixPage /></AppRoute>} />
-      <Route path="/scalp" element={<AppRoute><ScalpPage /></AppRoute>} />
       <Route path="/original-plus/signal/:id" element={<AppRoute><OriginalPlusSignalPage /></AppRoute>} />
       <Route path="/original-plus" element={<AppRoute><OriginalPlusPage /></AppRoute>} />
       <Route path="*" element={<Navigate to="/" replace />} />
