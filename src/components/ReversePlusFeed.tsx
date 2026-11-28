@@ -43,6 +43,7 @@ export function ReversePlusFeed({ variant }: Props) {
   const [rows, setRows] = useState<ReverseOutcome[]>([]);
   const [total, setTotal] = useState(0);
   const [evals, setEvals] = useState<Map<string, EvaluationPair>>(new Map());
+  const [evalsFailed, setEvalsFailed] = useState(false);
   const [counts, setCounts] = useState<ReverseCounts | null>(null);
   const [cfg, setCfg] = useState<PlusPublicConfig>(FALLBACK_PUBLIC_CONFIG);
   const [loading, setLoading] = useState(true);
@@ -54,7 +55,7 @@ export function ReversePlusFeed({ variant }: Props) {
     return () => clearTimeout(id);
   }, [symbol]);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (force = false) => {
     const my = ++seq.current;
     setLoading(true);
     setError(null);
@@ -65,16 +66,22 @@ export function ReversePlusFeed({ variant }: Props) {
           symbol: variant === 'analysis' ? debouncedSymbol : undefined,
           timeframe: variant === 'analysis' && timeframe ? timeframe : undefined,
           side: variant === 'analysis' && side ? side : undefined,
+          withCount: page === 0, // the total of a filter is the same on every page: count once, on the first page
+          force,
         }),
-        fetchPublicConfig().catch(() => null),
-        fetchReverseOutcomeCounts().catch(() => null),
+        // shared, cached reads (15 min / 45 s): switching tabs, filters or pages no longer re-reads them
+        fetchPublicConfig({ force }).catch(() => null),
+        fetchReverseOutcomeCounts({ force }).catch(() => null),
       ]);
-      // enrichment is best-effort: a signal is listed even when it has no evaluation yet
-      const ev = await fetchEvaluationsForIds(pageRes.rows.map((r) => r.id)).catch(() => new Map<string, EvaluationPair>());
+      // enrichment is best-effort: a signal is listed even when it has no evaluation yet — but a FAILED read is reported,
+      // never confused with "not evaluated yet"
+      let failed = false;
+      const ev = await fetchEvaluationsForIds(pageRes.rows.map((r) => r.id), { force }).catch(() => { failed = true; return new Map<string, EvaluationPair>(); });
       if (my !== seq.current) return; // a newer request superseded this one
       setRows(pageRes.rows);
-      setTotal(pageRes.total);
+      setTotal((prev) => pageRes.total ?? prev);
       setEvals(ev);
+      setEvalsFailed(failed);
       setCounts(cnt);
       if (cfgRes) setCfg(cfgRes);
     } catch (e) {
@@ -152,7 +159,13 @@ export function ReversePlusFeed({ variant }: Props) {
         <p className="text-[11px] text-slate-500">{t('rpListHint')}</p>
       </Card>
 
-      {loading ? <LoadingSpinner /> : error ? <ErrorState message={error} onRetry={() => void load()} /> : rows.length === 0 ? (
+      {!loading && !error && evalsFailed && rows.length > 0 && (
+        <p role="status" className="text-[12px] text-amber-400">
+          {t('rpEvalsUnavailable')}{' '}
+          <button type="button" className="underline" onClick={() => void load(true)}>{t('retry')}</button>
+        </p>
+      )}
+      {loading ? <LoadingSpinner /> : error ? <ErrorState message={error} onRetry={() => void load(true)} /> : rows.length === 0 ? (
         <EmptyState message={status === 'OPEN' && !debouncedSymbol && !timeframe && !side ? t('rpNoOpen') : t('rpNoMatch')} />
       ) : (
         <>
