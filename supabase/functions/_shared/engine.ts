@@ -20,8 +20,6 @@ export interface Candle {
   close: number;
   volume: number;
   closeTime: number;
-  /** Aggressive-buyer volume (Binance kline field 9). Optional: used by the Fast Scalp delta filter only. */
-  takerBuyVolume?: number;
 }
 
 export type SignalType = 'BUY' | 'SELL' | 'WAIT' | 'EXIT' | 'NO_TRADE';
