@@ -39,7 +39,12 @@ const supabase = createClient(
   Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
 );
 
-async function readCache(provider: string, cacheKey: string) {
+/**
+ * `maxAgeSeconds` (optional) lets ONE request accept only a fresher copy than the stored TTL allows (live pollers use it so
+ * a stable cache key never makes a live price older than before). It can only SHORTEN the TTL, never extend it; the stored
+ * row, its key and its ttl_seconds are untouched.
+ */
+async function readCache(provider: string, cacheKey: string, maxAgeSeconds?: number) {
   const { data } = await supabase
     .from("market_data_cache")
     .select("payload, fetched_at, ttl_seconds")
@@ -49,7 +54,8 @@ async function readCache(provider: string, cacheKey: string) {
 
   if (!data) return null;
   const ageSeconds = (Date.now() - new Date(data.fetched_at).getTime()) / 1000;
-  if (ageSeconds > data.ttl_seconds) return null;
+  const allowed = maxAgeSeconds === undefined ? data.ttl_seconds : Math.min(data.ttl_seconds, maxAgeSeconds);
+  if (ageSeconds > allowed) return null;
   return data.payload;
 }
 
@@ -76,18 +82,33 @@ async function fetchWithBackoff(url: string, init?: RequestInit, maxRetries = 3)
   }
 }
 
-async function cachedFetch(provider: string, cacheKey: string, ttlSeconds: number, url: string) {
-  const cached = await readCache(provider, cacheKey);
-  if (cached !== null) return { data: cached, fromCache: true };
+// Concurrent requests for the SAME cache key inside one function instance share one read / upstream call / write
+// (several browsers or tabs asking for the same candles at the same moment). The key and the TTL are unchanged.
+const inflight = new Map<string, Promise<{ data: unknown; fromCache: boolean }>>();
 
-  const res = await fetchWithBackoff(url);
-  if (!res.ok) {
-    const text = await res.text().catch(() => "");
-    throw new Error(`${provider} request failed (${res.status}): ${text.slice(0, 200)}`);
-  }
-  const data = await res.json();
-  await writeCache(provider, cacheKey, data, ttlSeconds);
-  return { data, fromCache: false };
+async function cachedFetch(provider: string, cacheKey: string, ttlSeconds: number, url: string, maxAgeSeconds?: number) {
+  const slot = `${provider}|${cacheKey}|${maxAgeSeconds ?? ""}`;
+  const running = inflight.get(slot);
+  if (running) return running;
+  const p = (async () => {
+    try {
+      const cached = await readCache(provider, cacheKey, maxAgeSeconds);
+      if (cached !== null) return { data: cached, fromCache: true };
+
+      const res = await fetchWithBackoff(url);
+      if (!res.ok) {
+        const text = await res.text().catch(() => "");
+        throw new Error(`${provider} request failed (${res.status}): ${text.slice(0, 200)}`);
+      }
+      const data = await res.json();
+      await writeCache(provider, cacheKey, data, ttlSeconds);
+      return { data, fromCache: false };
+    } finally {
+      inflight.delete(slot);
+    }
+  })();
+  inflight.set(slot, p);
+  return p;
 }
 
 function validateSymbol(symbol: string | null): string {
@@ -135,7 +156,10 @@ async function handleKlines(params: URLSearchParams) {
 
   const url = `${BINANCE_BASE}/api/v3/klines?${query.toString()}`;
   const cacheKey = `klines:${symbol}:${interval}:${limit}:${startTime ?? ""}:${endTime ?? ""}`;
-  const { data, fromCache } = await cachedFetch("binance", cacheKey, TTL.klines, url);
+  // optional freshness requirement of this request (seconds, 0..TTL): live pollers ask for a copy younger than their interval
+  const maxAgeRaw = params.get("maxAge");
+  const maxAge = maxAgeRaw === null || !Number.isFinite(Number(maxAgeRaw)) ? undefined : Math.min(Math.max(Math.trunc(Number(maxAgeRaw)), 0), TTL.klines);
+  const { data, fromCache } = await cachedFetch("binance", cacheKey, TTL.klines, url, maxAge);
 
   const candles = (data as unknown[][]).map((row) => ({
     openTime: row[0] as number,
@@ -145,7 +169,6 @@ async function handleKlines(params: URLSearchParams) {
     close: Number(row[4]),
     volume: Number(row[5]),
     closeTime: row[6] as number,
-    takerBuyVolume: row[9] === undefined ? undefined : Number(row[9]),
   }));
 
   return jsonResponse({ provider: "binance", symbol, interval, candles, fromCache });
