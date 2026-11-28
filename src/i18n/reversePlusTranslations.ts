@@ -34,6 +34,10 @@ export const reversePlusTranslations: Dict = {
     fa: 'شمارش‌ها مستقیم از نتایج سیگنال معکوس (همان منبع آزمایشگاه سیگنال معکوس) محاسبه می‌شوند.',
     en: 'Counts come straight from the reverse signal outcomes (the same source as Reverse Signal Lab).',
   },
+  rpEvalsUnavailable: {
+    fa: 'ارزیابی این سیگنال‌ها اکنون بارگذاری نشد؛ سیگنال‌ها نمایش داده می‌شوند. «تلاش مجدد» را بزنید یا صفحه را دوباره باز کنید.',
+    en: 'The evaluations of these signals could not be loaded right now; the signals are still listed. Retry or reopen the page.',
+  },
   rpListHint: {
     fa: 'محاسبات هر کارت با اهرم و مبلغ ذخیره‌شدهٔ همین مرورگر انجام می‌شود؛ برای تغییر آن‌ها وارد صفحهٔ جزئیات سیگنال شوید.',
     en: 'Each card is calculated with the leverage and amount saved in this browser; open a signal to change them.',
