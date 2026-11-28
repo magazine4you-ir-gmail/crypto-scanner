@@ -38,15 +38,6 @@ Every scanner works on **USDT pairs (ETHUSDT) and BTC pairs (ETHBTC)** with the 
 * **SELL on a BTC pair is not a short**: it means "sell the coin for BTC" (rotation) and is labelled that way; the *no futures* flag only applies to USDT pairs.
 * Signal Lab / `track-signal` accept BTC pairs; their P/L is measured in BTC. Prices below 0.001 are shown with 8 decimals.
 
-### Fast Scalp (`/scalp`)
-Separate strategy module `supabase/functions/_shared/scalp.ts` (alias `@scalp`, dependency-free like the engine). Short timeframes only (1m / 5m / 15m), closed candles only.
-* **Volume profile** from the candles (POC, value area VAH/VAL, HVN/LVN) · **smart-money**: liquidity sweep, MSS, FVG, order block · **price action** trigger: engulfing / pin bar / momentum · relative-volume confirmation and optional taker-buy delta · higher-timeframe bias filter (1m→15m, 5m→1h, 15m→4h).
-* Two models: `REVERSAL` (sweep + reclaim) and `CONTINUATION` (trend pullback into FVG/OB/volume node). BUY/SELL needs every gate; a setup that only lacks the trigger candle or score is `WAIT`.
-* **No greed**: one target (default 1.5R), clipped in front of the first wall (POC/HVN/swing), time stop after 10–15 bars. **Controlled risk**: structural stop beyond the raid wick, stop-size limits, risk % sizing capped at capital (no leverage), net R/R after fees, daily-loss cap and cooldown in the backtest.
-* **Fees are part of the strategy**: default 0.10 % round trip. When fees would eat more than 30 % of 1R the trade is rejected (`COST_TOO_HIGH`). On 1m the ATR is often smaller than the fee, so expect few or no signals there: that is the filter working.
-* The backtest page section reports *why* setups were rejected. Random-walk sanity check (no edge exists): ~50 % win rate and ~0R expectancy without fees, i.e. no look-ahead.
-* Not covered: real order-book / footprint data (candles only), server-side scalp scanning, live execution.
-
 ### Signal Lab (paper trading)
 * Registered **once per signal** (first scan where the type flips to BUY/SELL) — unique index per signal candle.
 * Resolved **on the server** from closed candles after the signal candle: stop is checked before target in the same bar, gaps exit at the open, 0.25 % round-trip cost is deducted, expiry after N bars.
