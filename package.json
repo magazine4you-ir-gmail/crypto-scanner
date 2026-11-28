@@ -11,6 +11,8 @@
     "typecheck": "tsc --noEmit -p tsconfig.app.json",
     "test": "vitest run",
     "bundle:functions": "node scripts/bundle-functions.mjs",
+    "eval:harness": "node scripts/eval-harness/run.mjs",
+    "check:market-data": "node scripts/eval-harness/market-data-check.mjs",
     "audit": "tsx scripts/audit-signals.ts"
   },
   "dependencies": {
