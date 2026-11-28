@@ -287,7 +287,6 @@ export const translations: Translations = {
 
   // Signal Lab
   signalLab: { fa: 'آزمایشگاه سیگنال', en: 'Signal Lab' },
-  scalp: { fa: 'فست اسکالپ', en: 'Fast Scalp' },
   sellToBtc: { fa: 'فروش به BTC', en: 'Sell → BTC' },
   quotePair: { fa: 'جفت‌ارز', en: 'Quote' },
   quoteBoth: { fa: 'USDT + BTC', en: 'USDT + BTC' },
