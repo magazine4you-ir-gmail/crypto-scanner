@@ -19,7 +19,6 @@ import {
   X,
   TestTubes,
   ArrowLeftRight,
-  Zap,
   Layers,
   CircleDot,
 } from 'lucide-react';
@@ -34,7 +33,6 @@ const baseNavItems = [
   { key: 'signalLab', path: '/signal-lab', icon: TestTubes },
   { key: 'reverseLab', path: '/reverse-lab', icon: ArrowLeftRight },
   { key: 'powerMix', path: '/power-mix', icon: Layers },
-  { key: 'scalp', path: '/scalp', icon: Zap },
   { key: 'watchlist', path: '/watchlist', icon: Star },
   { key: 'portfolio', path: '/portfolio', icon: Briefcase },
   { key: 'journal', path: '/journal', icon: BookOpen },
