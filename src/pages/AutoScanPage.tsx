@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Timer, RefreshCw, Search, TrendingUp, TrendingDown, Clock, AlertTriangle } from 'lucide-react';
 import { timeframeMs, quoteOf } from '@engine';
@@ -11,7 +11,8 @@ import { QuoteChip, ConfluenceBadge } from '@/components/Quote';
 import { computeConfluence, confluenceFor, isDualSignal, type Confluence } from '@/engine/confluence';
 import { formatPrice, formatNumber, formatDate, timeAgo } from '@/i18n/format';
 import type { TrendDirection } from '@/types/signal';
-import { fetchScanResults, fetchLatestScanRun, type ScanResultRow, type ScanRunRow } from '@/services/scanService';
+import { fetchScanResults, fetchLatestScanRun, scanRunSignature, type ScanResultRow, type ScanRunRow } from '@/services/scanService';
+import { useVisibleInterval } from '@/hooks/useVisibleInterval';
 
 type Tab = 'ACTION' | 'DUAL' | 'BUY' | 'SELL' | 'WAIT' | 'ALL';
 type Pair = 'ALL' | 'USDT' | 'BTC';
@@ -48,10 +49,19 @@ export function AutoScanPage() {
   const [query, setQuery] = useState('');
   const [pair, setPair] = useState<Pair>('ALL');
 
-  const load = useCallback(async () => {
+  // The ~1000 result rows only change when a scan writes them. Every 60 s we read the single latest `scan_runs` row and
+  // re-read the results only when that run is new / just finished / still running (or on the first load, or on demand).
+  const seenRun = useRef<string | null>(null);
+  const loadSeq = useRef(0);
+  const load = useCallback(async (force = false) => {
+    const my = ++loadSeq.current;
     try {
-      const [rows, latest] = await Promise.all([fetchScanResults(), fetchLatestScanRun()]);
-      setResults(rows);
+      const latest = await fetchLatestScanRun();
+      const sig = scanRunSignature(latest);
+      const changed = force || seenRun.current === null || sig !== seenRun.current || latest?.status === 'running';
+      const rows = changed ? await fetchScanResults({ force: true }) : null;
+      if (my !== loadSeq.current) return; // a newer load superseded this one
+      if (rows) { setResults(rows); seenRun.current = sig; }
       setRun(latest);
       setError(null);
     } catch (e) {
@@ -68,9 +78,10 @@ export function AutoScanPage() {
       return;
     }
     void load();
-    const id = setInterval(() => void load(), REFRESH_MS);
-    return () => clearInterval(id);
   }, [authLoading, user, load]);
+
+  // every 60 s while the tab is visible (no polling from a background tab; catches up when the tab is shown again)
+  useVisibleInterval(() => void load(), REFRESH_MS, !authLoading && !!user);
 
   const timeframes = useMemo(
     () =>
@@ -171,7 +182,7 @@ export function AutoScanPage() {
       <div className="flex items-center justify-between gap-3">
         <Header />
         <button
-          onClick={() => void load()}
+          onClick={() => void load(true)}
           className="btn-secondary text-sm inline-flex items-center gap-2 shrink-0"
           aria-label={t('asRefresh')}
         >
@@ -186,7 +197,7 @@ export function AutoScanPage() {
       {error && (
         <ErrorState
           message={/scan_(results|runs)/.test(error) ? t('asTablesMissing') : error}
-          onRetry={() => void load()}
+          onRetry={() => void load(true)}
         />
       )}
 
