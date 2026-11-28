@@ -1,4 +1,5 @@
 import { supabase } from './supabaseClient';
+import { cachedRequest } from './requestCache';
 
 /**
  * Reverse Signal Plus client service (read-only).
@@ -91,10 +92,16 @@ export interface PlusPublicConfig {
   min_rr: number;
 }
 
-export async function fetchPublicConfig(): Promise<PlusPublicConfig | null> {
-  const { data, error } = await supabase.from('reverse_plus_public_config').select('*').maybeSingle();
-  if (error) throw new Error(error.message);
-  return (data as PlusPublicConfig | null) ?? null;
+const CONFIG_COLS = 'public_since, assumed_mmr_pct, liq_safety_factor, approach_pct, account_balance, risk_pct, max_risk_per_trade, leverage, fee_pct, slippage_pct, min_rr';
+/** The reference config changes only when an admin edits it by hand: one read per 15 minutes is plenty (shared by every page). */
+export const PUBLIC_CONFIG_TTL_MS = 15 * 60_000;
+
+export async function fetchPublicConfig(opts: { force?: boolean } = {}): Promise<PlusPublicConfig | null> {
+  return cachedRequest('rp:config', PUBLIC_CONFIG_TTL_MS, async () => {
+    const { data, error } = await supabase.from('reverse_plus_public_config').select(CONFIG_COLS).maybeSingle();
+    if (error) throw new Error(error.message);
+    return (data as PlusPublicConfig | null) ?? null;
+  }, { force: opts.force });
 }
 
 /** Central historical backtest row (raw facts; leverage / PnL are derived in the browser by the pure engine). */
@@ -126,41 +133,63 @@ export interface PlusBacktest {
   engine_version: string;
 }
 
+/** Every PlusBacktest field, nothing else (the table also holds `assumptions` / `created_at`, which no screen reads). */
+export const BACKTEST_COLS = 'id, reverse_outcome_id, symbol, timeframe, side, signal_at, signal_close_time, entry_level, stop_loss, take_profit, strategy_status, outcome, reason, entry_time, entry_price, exit_time, exit_price, exit_reason, bars_to_entry, bars_held, worst_price, best_price, candles_used, lower_tf_used, engine_version';
+
 export async function fetchBacktestFor(reverseOutcomeId: string): Promise<PlusBacktest | null> {
-  const { data, error } = await supabase.from('reverse_plus_backtests').select('*').eq('reverse_outcome_id', reverseOutcomeId).maybeSingle();
-  if (error) throw new Error(error.message);
-  return (data as PlusBacktest | null) ?? null;
+  // a backtest row is written once and never changes; a missing row (not evaluated yet) is re-checked after a minute
+  return cachedRequest(`rp:bt:${reverseOutcomeId}`, 60_000, async () => {
+    const { data, error } = await supabase.from('reverse_plus_backtests').select(BACKTEST_COLS).eq('reverse_outcome_id', reverseOutcomeId).maybeSingle();
+    if (error) throw new Error(error.message);
+    return (data as PlusBacktest | null) ?? null;
+  });
 }
 
+const EVAL_BASE_COLS = 'id, reverse_outcome_id, origin_outcome_id, symbol, timeframe, side, eval_kind, as_of_close_time, current_price, zone_low, zone_high, reverse_entry, stop_loss, take_profit, recommended_entry, entry_range_low, entry_range_high, distance_to_entry_pct, risk_distance, reward_distance, rr_gross, rr_net, rr_basis, min_rr_used, entry_status, quality_score, quality_grade, leverage, risk_amount, total_notional, total_margin, avg_entry, entries_count, max_safe_leverage, liq_estimate, contract_known, signal_at';
+/** Signal detail page: every field. */
+export const EVAL_FULL_COLS = `${EVAL_BASE_COLS}, status_reasons, quality_factors, plan, plan_issues`;
+/** Lists: without the four large JSON columns (no list / card reads them). */
+export const EVAL_LIST_COLS = EVAL_BASE_COLS;
+
 /** Central SIGNAL_TIME + LIVE evaluations of one signal. */
-export async function fetchEvaluationsFor(reverseOutcomeId: string): Promise<{ signalTime: PlusEvaluation | null; live: PlusEvaluation | null }> {
-  const { data, error } = await supabase.from('reverse_plus_evaluations').select('*').is('user_id', null).eq('owner_key', REVERSE_PLUS_CENTRAL_OWNER).eq('source', 'CENTRAL').eq('reverse_outcome_id', reverseOutcomeId);
-  if (error) throw new Error(error.message);
-  const rows = (data ?? []) as PlusEvaluation[];
-  return { signalTime: rows.find((r) => r.eval_kind === 'SIGNAL_TIME') ?? null, live: rows.find((r) => r.eval_kind === 'LIVE') ?? null };
+export async function fetchEvaluationsFor(reverseOutcomeId: string, opts: { force?: boolean } = {}): Promise<{ signalTime: PlusEvaluation | null; live: PlusEvaluation | null }> {
+  return cachedRequest(`rp:ev:${reverseOutcomeId}`, 15_000, async () => {
+    const { data, error } = await supabase.from('reverse_plus_evaluations').select(EVAL_FULL_COLS).is('user_id', null).eq('owner_key', REVERSE_PLUS_CENTRAL_OWNER).eq('source', 'CENTRAL').eq('reverse_outcome_id', reverseOutcomeId);
+    if (error) throw new Error(error.message);
+    const rows = (data ?? []) as unknown as PlusEvaluation[];
+    return { signalTime: rows.find((r) => r.eval_kind === 'SIGNAL_TIME') ?? null, live: rows.find((r) => r.eval_kind === 'LIVE') ?? null };
+  }, { force: opts.force });
 }
 
 /** Evaluations of a page of signals in ONE request (central rows only). Missing entries simply mean "not evaluated yet". */
 export interface EvaluationPair { signalTime: PlusEvaluation | null; live: PlusEvaluation | null }
 
-export async function fetchEvaluationsForIds(ids: string[]): Promise<Map<string, EvaluationPair>> {
-  const out = new Map<string, EvaluationPair>();
-  if (ids.length === 0) return out;
-  const { data, error } = await supabase
-    .from('reverse_plus_evaluations')
-    .select('*')
-    .is('user_id', null)
-    .eq('owner_key', REVERSE_PLUS_CENTRAL_OWNER)
-    .eq('source', 'CENTRAL')
-    .in('reverse_outcome_id', ids);
-  if (error) throw new Error(error.message);
-  for (const r of (data ?? []) as PlusEvaluation[]) {
-    const cur = out.get(r.reverse_outcome_id) ?? { signalTime: null, live: null };
-    if (r.eval_kind === 'SIGNAL_TIME') cur.signalTime = r;
-    else cur.live = r;
-    out.set(r.reverse_outcome_id, cur);
-  }
-  return out;
+/** LIVE rows change at most when a candle closes; 30 s only collapses repeated mounts / tab switches / double effects. */
+export const EVALUATIONS_TTL_MS = 30_000;
+
+export async function fetchEvaluationsForIds(ids: string[], opts: { force?: boolean } = {}): Promise<Map<string, EvaluationPair>> {
+  if (ids.length === 0) return new Map();
+  const key = `rp:evs:${[...ids].sort().join(',')}`;
+  return cachedRequest(key, EVALUATIONS_TTL_MS, async () => {
+    const out = new Map<string, EvaluationPair>();
+    const { data, error } = await supabase
+      .from('reverse_plus_evaluations')
+      .select(EVAL_LIST_COLS)
+      .is('user_id', null)
+      .eq('owner_key', REVERSE_PLUS_CENTRAL_OWNER)
+      .eq('source', 'CENTRAL')
+      .in('reverse_outcome_id', ids);
+    if (error) throw new Error(error.message);
+    for (const raw of (data ?? []) as unknown as PlusEvaluation[]) {
+      // the large JSON columns are not fetched for lists; keep the declared shape with neutral values
+      const r: PlusEvaluation = { ...raw, status_reasons: [], quality_factors: null, plan: null, plan_issues: [] };
+      const cur = out.get(r.reverse_outcome_id) ?? { signalTime: null, live: null };
+      if (r.eval_kind === 'SIGNAL_TIME') cur.signalTime = r;
+      else cur.live = r;
+      out.set(r.reverse_outcome_id, cur);
+    }
+    return out;
+  }, { force: opts.force });
 }
 
 export { FALLBACK_PUBLIC_CONFIG } from '@/reversePlus/fallbackConfig';
