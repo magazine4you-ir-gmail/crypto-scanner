@@ -5,6 +5,13 @@ import { pickScanTargets, type QuoteMode, type ScanTarget } from '@/engine/scanT
 export type { QuoteMode, ScanTarget };
 import { supabase } from './supabaseClient';
 
+/** An `endTime` within this many ms of "now" means "up to the present". */
+export const LIVE_END_TOLERANCE_MS = 2_000;
+/** True when the requested window ends at the present (so no explicit end must be sent). */
+export function isLiveEnd(endTime: number, nowMs: number = Date.now()): boolean {
+  return endTime >= nowMs - LIVE_END_TOLERANCE_MS;
+}
+
 const isDev = import.meta.env.DEV;
 
 const BINANCE_BASE = isDev ? '/api/binance' : 'https://data-api.binance.vision';
@@ -55,13 +62,20 @@ function parseKlines(rows: unknown[][]): Candle[] {
     close: Number(row[4]),
     volume: Number(row[5]),
     closeTime: row[6] as number,
-    takerBuyVolume: row[9] === undefined ? undefined : Number(row[9]),
   }));
 }
 
+/**
+ * Live requests ("up to now") accept a cached copy only if it is at most this old, so a stable cache key never makes a live
+ * price older than it was when every call was a miss. (The gateway's own TTL for klines is 30 s; this only shortens it.)
+ */
+export const LIVE_MAX_AGE_SECONDS = 5;
+
 /** Raw klines INCLUDING the forming candle (charts need it). The engine drops it before analysing. */
-export async function fetchKlines(symbol: string, interval: Timeframe, limit = 300): Promise<Candle[]> {
-  const proxied = await viaProxy<{ candles: Candle[] }>('klines', { symbol, interval, limit });
+export async function fetchKlines(symbol: string, interval: Timeframe, limit = 300, opts: { maxAgeSeconds?: number } = {}): Promise<Candle[]> {
+  const params: Record<string, string | number> = { symbol, interval, limit };
+  if (opts.maxAgeSeconds !== undefined) params.maxAge = opts.maxAgeSeconds;
+  const proxied = await viaProxy<{ candles: Candle[] }>('klines', params);
   if (proxied?.candles?.length) return proxied.candles;
   const data = await fetchJson<unknown[][]>(`${BINANCE_BASE}/api/v3/klines?symbol=${symbol}&interval=${interval}&limit=${limit}`);
   return parseKlines(data);
@@ -72,13 +86,18 @@ export async function fetchKlines(symbol: string, interval: Timeframe, limit = 3
  * Uses the Supabase market-data Gateway for historical ranges, with direct Binance fallback. Includes the forming candle.
  */
 export async function fetchKlinesRange(symbol: string, interval: Timeframe, startTime: number, endTime: number, limit = 1000): Promise<Candle[]> {
-  const params = {
+  // "up to now" is expressed by OMITTING endTime: Binance returns the same candles, and the request becomes identical for
+  // every caller of the same window. A Date.now()-based endTime made every call unique, so the gateway cache never hit
+  // and left one never-reused cache row per call.
+  const live = isLiveEnd(endTime);
+  const params: Record<string, string | number> = {
     symbol,
     interval,
     startTime: Math.floor(startTime),
-    endTime: Math.floor(endTime),
     limit,
   };
+  if (!live) params.endTime = Math.floor(endTime);
+  else params.maxAge = LIVE_MAX_AGE_SECONDS; // proxy only: a live window must not be served from an older copy
 
   // Prefer the Supabase Gateway so historical replay does not depend on
   // direct browser access to Binance.
@@ -92,9 +111,9 @@ export async function fetchKlinesRange(symbol: string, interval: Timeframe, star
     symbol,
     interval,
     startTime: String(params.startTime),
-    endTime: String(params.endTime),
     limit: String(limit),
-  });
+  });  // (maxAge is a gateway-only hint: never sent to Binance)
+  if (!live) query.set('endTime', String(params.endTime));
 
   const data = await fetchJson<unknown[][]>(
     `${BINANCE_BASE}/api/v3/klines?${query.toString()}`,
