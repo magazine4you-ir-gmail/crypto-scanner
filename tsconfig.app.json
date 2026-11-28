@@ -18,8 +18,7 @@
     "baseUrl": ".",
     "paths": {
       "@/*": ["src/*"],
-      "@engine": ["supabase/functions/_shared/engine.ts"],
-      "@scalp": ["supabase/functions/_shared/scalp.ts"]
+      "@engine": ["supabase/functions/_shared/engine.ts"]
     },
 
     /* Linting */
