@@ -30,6 +30,7 @@ import {
   candleRangeFor,
   fetchBacktestsForIds,
   fetchBtcCandles,
+  fetchRecentBtcCandles,
   fetchMixPairs,
   fetchPowerMixConfig,
 } from '@/services/powerMixService';
@@ -60,7 +61,7 @@ import { ALL_TIME, isOrdered, keyInRange, singleDay, type DateRange } from '@/po
 import { buildDayHistory } from '@/powerMix/history';
 import { readThermo } from '@/powerMix/thermo';
 import { buildTradeBook, computeMixStats, type MixTrade, type TradeBook, type TradeStatus } from '@/powerMix/tradeCalc';
-import { DAY_MS } from '@/powerMix/tehranTime';
+import { useVisibleInterval } from '@/hooks/useVisibleInterval';
 
 type StatusTab = 'ALL' | 'OPEN' | 'WIN' | 'LOSS' | 'EXPIRED';
 type Dir = 'ALL' | 'BUY' | 'SELL';
@@ -106,14 +107,16 @@ export function PowerMixPage() {
   const cfg = personal ?? globalCfg;
   const prefs = useMemo(() => userPrefs ?? defaultPrefs(publicCfg), [userPrefs, publicCfg]);
 
-  const load = useCallback(async () => {
+  const loadSeq = useRef(0);
+  const load = useCallback(async (force = false) => {
+    const my = ++loadSeq.current;
     setLoading(true);
     setError(null);
     try {
       const [res, g, pub, latest] = await Promise.all([
-        fetchMixPairs(),
-        fetchPowerMixConfig(),
-        fetchPublicConfig().catch(() => null),
+        fetchMixPairs(undefined, { force }),
+        fetchPowerMixConfig({ force }),
+        fetchPublicConfig({ force }).catch(() => null),
         fetchLatestScanRun().catch(() => null),
       ]);
       const now = Date.now();
@@ -128,10 +131,11 @@ export function PowerMixPage() {
       let bts = new Map<string, PlusBacktest>();
       let failed = false;
       try {
-        bts = await fetchBacktestsForIds(res.pairs.map((p) => p.reverse.id));
+        bts = await fetchBacktestsForIds(res.pairs.map((p) => p.reverse.id), { force });
       } catch {
         failed = true;
       }
+      if (my !== loadSeq.current) return; // a newer load superseded this one
       setPairs(res.pairs);
       setTruncated(res.truncated);
       setGlobalCfg(g);
@@ -144,9 +148,9 @@ export function PowerMixPage() {
       setNowMs(now);
       setShown(PAGE);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      if (my === loadSeq.current) setError(e instanceof Error ? e.message : String(e));
     } finally {
-      setLoading(false);
+      if (my === loadSeq.current) setLoading(false);
     }
   }, []);
 
@@ -165,11 +169,7 @@ export function PowerMixPage() {
   }, [authLoading, userId, load]);
 
   // تیک ساعت: timeAgo و live()/دماسنج با nowMs جدید محاسبه می‌شوند
-  useEffect(() => {
-    if (!userId) return;
-    const id = window.setInterval(() => setNowMs(Date.now()), 30_000);
-    return () => window.clearInterval(id);
-  }, [userId]);
+  useVisibleInterval(() => setNowMs(Date.now()), 30_000, !!userId);
 
   /**
    * رفرش سبک (مثل auto-scan): فقط آخرین اسکن + کندل‌های اخیر BTC.
@@ -186,7 +186,7 @@ export function PowerMixPage() {
       /* ignore */
     }
     try {
-      const c = await fetchBtcCandles(now - 2 * DAY_MS, now);
+      const c = await fetchRecentBtcCandles();
       if (c.length > 0) {
         setCandles((prev) => {
           const map = new Map(prev.map((x) => [x.openTime, x]));
@@ -200,11 +200,8 @@ export function PowerMixPage() {
     }
   }, [userId]);
 
-  useEffect(() => {
-    if (authLoading || !userId) return;
-    const id = window.setInterval(() => void softRefresh(), LIVE_MS);
-    return () => window.clearInterval(id);
-  }, [authLoading, userId, softRefresh]);
+  // every 60 s while the tab is visible; a hidden tab makes no requests and catches up when shown again
+  useVisibleInterval(() => void softRefresh(), LIVE_MS, !authLoading && !!userId);
 
   const analyzer = useMemo(() => createDayAnalyzer(candles, cfg, nowMs), [candles, cfg, nowMs]);
   const live = useMemo(() => analyzer.live(), [analyzer]);
@@ -392,7 +389,7 @@ export function PowerMixPage() {
       <div className="flex items-center justify-between gap-3">
         {header}
         <button
-          onClick={() => void load()}
+          onClick={() => void load(true)}
           className="btn-secondary text-sm inline-flex items-center gap-2 shrink-0"
           aria-label={t('asRefresh')}
         >
@@ -402,7 +399,7 @@ export function PowerMixPage() {
       </div>
 
       {loading && <LoadingSpinner size="lg" />}
-      {error && <ErrorState message={error} onRetry={() => void load()} />}
+      {error && <ErrorState message={error} onRetry={() => void load(true)} />}
 
       {!loading && !error && (
         <>
