@@ -1,4 +1,5 @@
 import { supabase } from './supabaseClient';
+import { cachedRequest } from './requestCache';
 import type { SignalOutcome, OutcomeSignalType, OutcomeStatus } from './outcomeService';
 
 /**
@@ -58,19 +59,37 @@ export interface ReversePageQuery {
   symbol?: string;
   timeframe?: string;
   side?: 'BUY' | 'SELL';
+  /**
+   * Ask PostgREST for the exact total (an extra COUNT per request). The total of a filter does not change while the user
+   * pages through it, so only the first page needs it; later pages return `total: null` and the caller keeps the one it has.
+   * Default true (previous behaviour).
+   */
+  withCount?: boolean;
+  /** bypass the short-lived cache (retry button) */
+  force?: boolean;
 }
+
+/** Signals change when a scan closes them (hourly); 30 s only collapses double effects, remounts and tab switches. */
+export const PAGE_TTL_MS = 30_000;
+export const COUNTS_TTL_MS = 45_000;
 
 /**
  * One server-side page of reverse signals, newest first, straight from `reverse_signal_outcomes` (the same table and the
  * same CANCELLED exclusion as Reverse Signal Lab). The open / closed / profit / loss / expired state is therefore the Lab's
  * own state, never a parallel one.
  */
-export async function fetchReverseOutcomePage(q: ReversePageQuery): Promise<{ rows: ReverseOutcome[]; total: number }> {
+export async function fetchReverseOutcomePage(q: ReversePageQuery): Promise<{ rows: ReverseOutcome[]; total: number | null }> {
+  const { force, ...key } = q;
+  return cachedRequest(`rev:page:${JSON.stringify(key)}`, PAGE_TTL_MS, () => fetchReverseOutcomePageUncached(q), { force });
+}
+
+async function fetchReverseOutcomePageUncached(q: ReversePageQuery): Promise<{ rows: ReverseOutcome[]; total: number | null }> {
   const size = q.pageSize ?? 100;
   const from = q.page * size;
+  const withCount = q.withCount !== false;
   let query = supabase
     .from('reverse_signal_outcomes')
-    .select(SELECT, { count: 'exact' })
+    .select(SELECT, withCount ? { count: 'exact' } : undefined)
     .neq('status', 'CANCELLED');
   if (q.status !== 'ALL') query = query.eq('status', q.status);
   if (q.timeframe) query = query.eq('timeframe', q.timeframe);
@@ -82,13 +101,17 @@ export async function fetchReverseOutcomePage(q: ReversePageQuery): Promise<{ ro
     .order('id', { ascending: false }) // stable order across pages
     .range(from, from + size - 1);
   if (error) throw new Error(error.message);
-  return { rows: (data ?? []).map(normalize), total: count ?? 0 };
+  return { rows: (data ?? []).map(normalize), total: withCount ? (count ?? 0) : null };
 }
 
 export interface ReverseCounts { open: number; win: number; loss: number; expired: number; total: number }
 
 /** Trustworthy counts: exact head-counts on `reverse_signal_outcomes` (CANCELLED excluded, like the Lab). */
-export async function fetchReverseOutcomeCounts(): Promise<ReverseCounts> {
+export async function fetchReverseOutcomeCounts(opts: { force?: boolean } = {}): Promise<ReverseCounts> {
+  return cachedRequest('rev:counts', COUNTS_TTL_MS, fetchReverseOutcomeCountsUncached, { force: opts.force });
+}
+
+async function fetchReverseOutcomeCountsUncached(): Promise<ReverseCounts> {
   const one = async (status: Exclude<ReverseStatusFilter, 'ALL'>): Promise<number> => {
     const { count, error } = await supabase
       .from('reverse_signal_outcomes')
