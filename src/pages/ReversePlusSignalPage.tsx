@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { ArrowRight, Pause, Play, RefreshCw, SkipBack, SkipForward } from 'lucide-react';
 import { useSettings } from '@/contexts/SettingsContext';
@@ -9,7 +9,8 @@ import { PriceChart, type ChartLine, type ChartMarker } from '@/components/Price
 import { formatPrice, formatNumber, formatPercent } from '@/i18n/format';
 import { fetchReverseOutcomeById, type ReverseOutcome } from '@/services/reverseOutcomeService';
 import { FALLBACK_PUBLIC_CONFIG, fetchBacktestFor, fetchEvaluationsFor, fetchPublicConfig, type PlusBacktest, type PlusEvaluation, type PlusPublicConfig } from '@/services/reversePlusService';
-import { fetchKlinesRange } from '@/services/marketData';
+import { fetchKlines, fetchKlinesRange, LIVE_MAX_AGE_SECONDS } from '@/services/marketData';
+import { useVisibleInterval } from '@/hooks/useVisibleInterval';
 import type { Candle, Timeframe } from '@/types/market';
 import { isReversePlusEnabled } from '@/reversePlus/featureFlag';
 import { rowToResult } from '@/reversePlus/backtestRows';
@@ -72,11 +73,14 @@ export function ReversePlusSignalPage() {
   const signalTf = rev ? normTf(rev.timeframe) : null;
   const signalClose = rev?.candle_close_time ? Date.parse(rev.candle_close_time) : null;
 
+  const loadSeq = useRef(0); // a slow response of a previous signal must never overwrite the current one
   const load = useCallback(async () => {
     if (!id) return;
+    const my = ++loadSeq.current;
     setLoading(true); setError(null);
     try {
       const [r, evs, bt, c] = await Promise.all([fetchReverseOutcomeById(id), fetchEvaluationsFor(id), fetchBacktestFor(id), fetchPublicConfig()]);
+      if (my !== loadSeq.current) return;
       if (!r) throw new Error(t('rpNotFound'));
       setRev(r); setSt(evs.signalTime); setLiveEval(evs.live); setStored(bt); setCfg(c);
       const stf = normTf(r.timeframe);
@@ -85,12 +89,13 @@ export function ReversePlusSignalPage() {
       const bars = EXPIRY_BARS_BY_TF[stf] ?? 48;
       const end = Math.min(Date.now(), closeMs + (bars * 2 + 5) * stepMs);
       const k = await fetchKlinesRange(r.symbol, stf, closeMs - 120 * stepMs, Math.max(end, Date.now() - 1), 1000);
+      if (my !== loadSeq.current) return;
       setAnalysis(k); setTf((prev) => prev ?? stf);
       const histo = isHistoricalSignal(r.signal_at, c?.public_since);
       setMode(histo ? 'REPLAY' : 'LIVE');
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
-    } finally { setLoading(false); }
+    } finally { if (my === loadSeq.current) setLoading(false); }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
   useEffect(() => { void load(); }, [load]);
@@ -105,21 +110,23 @@ export function ReversePlusSignalPage() {
     return () => { alive = false; };
   }, [tf, analysis, rev, signalTf, signalClose]);
 
-  // LIVE mode: refresh the latest price/candles
-  useEffect(() => {
-    if (mode !== 'LIVE' || !rev || !tf) return;
-    const t = setInterval(() => {
-      const step = TF_MS[tf] ?? 3_600_000;
-      void fetchKlinesRange(rev.symbol, tf, Date.now() - 3 * step, Date.now()).then((k) => {
-        setView((prev) => {
-          const map = new Map(prev.map((c) => [c.openTime, c]));
-          for (const c of k) map.set(c.openTime, c);
-          return [...map.values()].sort((a, b) => a.openTime - b.openTime);
-        });
-      }).catch(() => undefined);
-    }, 20_000);
-    return () => clearInterval(t);
-  }, [mode, rev, tf]);
+  // LIVE mode: refresh the latest price/candles every 20 s while the tab is visible (paused in a background tab).
+  // It asks for "the last 4 candles" (a stable request the gateway can cache) instead of a time window ending at Date.now(),
+  // which was different on every call and could never be a cache hit.
+  const liveKey = useRef('');
+  liveKey.current = rev && tf ? `${rev.symbol}|${tf}` : '';
+  useVisibleInterval(() => {
+    if (!rev || !tf) return;
+    const key = `${rev.symbol}|${tf}`;
+    void fetchKlines(rev.symbol, tf, 4, { maxAgeSeconds: LIVE_MAX_AGE_SECONDS }).then((k) => {
+      if (liveKey.current !== key) return; // the symbol / timeframe changed while this was in flight
+      setView((prev) => {
+        const map = new Map(prev.map((c) => [c.openTime, c]));
+        for (const c of k) map.set(c.openTime, c);
+        return [...map.values()].sort((a, b) => a.openTime - b.openTime);
+      });
+    }).catch(() => undefined);
+  }, 20_000, mode === 'LIVE' && !!rev && !!tf);
 
   const entryLevel = rev ? entryOf(rev, st, stored?.entry_level ?? null) : null;
   const stop = rev ? Number(rev.stop_loss) : null;
